@@ -255,16 +255,18 @@ libwhisper.so: ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) -shared -o libwhisper.so ggml.o $(WHISPER_OBJ) $(LDFLAGS)
 
 clean:
-	rm -f *.o main stream command talk talk-llama bench quantize libwhisper.a libwhisper.so
+	rm -f *.o main stream stream.gst command talk talk-llama bench quantize libwhisper.a libwhisper.so
 
 #
 # Examples
 #
 
 CC_SDL=`sdl2-config --cflags --libs`
+CC_GST=`pkg-config --cflags --libs gstreamer-1.0 gstreamer-audio-1.0`
 
 SRC_COMMON     = examples/common.cpp examples/common-ggml.cpp
 SRC_COMMON_SDL = examples/common-sdl.cpp
+SRC_COMMON_GST = examples/common-gstreamer.cpp
 
 main: examples/main/main.cpp $(SRC_COMMON) ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/main/main.cpp $(SRC_COMMON) ggml.o $(WHISPER_OBJ) -o main $(LDFLAGS)
@@ -278,6 +280,9 @@ quantize: examples/quantize/quantize.cpp ggml.o $(WHISPER_OBJ) $(SRC_COMMON)
 
 stream: examples/stream/stream.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/stream/stream.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) ggml.o $(WHISPER_OBJ) -o stream $(CC_SDL) $(LDFLAGS)
+
+stream.gst: examples/stream.gst/stream.cpp $(SRC_COMMON) $(SRC_COMMON_GST) ggml.o $(WHISPER_OBJ)
+	$(CXX) $(CXXFLAGS) examples/stream.gst/stream.cpp $(SRC_COMMON) $(SRC_COMMON_GST) ggml.o $(WHISPER_OBJ) -o stream.gst $(CC_GST) $(LDFLAGS) 
 
 command: examples/command/command.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/command/command.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) ggml.o $(WHISPER_OBJ) -o command $(CC_SDL) $(LDFLAGS)
