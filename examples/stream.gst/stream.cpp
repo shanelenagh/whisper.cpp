@@ -246,7 +246,8 @@ int main(int argc, char ** argv) {
         // process new audio
 
         if (!use_vad) {
-            while (true) {
+            
+            while (audio.poll_stream_events()) {    // Catch error events while in this "waiting" loop
                 audio.get(params.step_ms, pcmf32_new);
 
                 if ((int) pcmf32_new.size() > 2*n_samples_step) {
