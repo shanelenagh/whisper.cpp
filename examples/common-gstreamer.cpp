@@ -1,8 +1,6 @@
 #include "common-gstreamer.h"
 
 
-static bool gstreamerStopped = false;
-
 audio_gstreamer::audio_gstreamer(int len_ms) {
     m_len_ms = len_ms;   
     m_running = false;
@@ -49,21 +47,21 @@ static GstFlowReturn gstreamer_new_sample (GstElement *sink, audio_gstreamer *st
 }
 
 /* Non-threaded (no GLib mainloop) synchronous message handler */
-static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, gpointer data) {
+static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, audio_gstreamer* gstreamer) {
   switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_ERROR:
       GError *err;
       gchar *debug_info;
       gst_message_parse_error (msg, &err, &debug_info);
-      fprintf (stderr, "%s: Gstreamer received an error from element %s: %s\n", __func__, GST_OBJECT_NAME (msg->src), err->message);
+      fprintf (stderr, "\n%s: Gstreamer received an error from element %s: %s\n", __func__, GST_OBJECT_NAME (msg->src), err->message);
       fprintf (stderr, "%s: Debugging information: %s\n", __func__, debug_info ? debug_info : "none");
       g_clear_error (&err);
       g_free (debug_info);      
-      gstreamerStopped = true;
+      gstreamer->shutdown();
       break;
     case GST_MESSAGE_EOS:
       fprintf (stderr, "%s: Gstreamer reached end of stream\n", __func__);
-      gstreamerStopped = true;
+      gstreamer->shutdown();
       break;
   }    
   return GST_BUS_DROP;
@@ -119,7 +117,7 @@ bool audio_gstreamer::init(int* argc, char*** argv, std::string pipelineDescript
     /* Instruct the bus to emit signals for each received message, and connect to the interesting signals */
     GstBus *bus = gst_element_get_bus (pipeline);
     gst_bus_add_signal_watch (bus);
-    gst_bus_set_sync_handler(bus, (GstBusSyncHandler)bus_sync_handler, NULL, NULL);   
+    gst_bus_set_sync_handler(bus, (GstBusSyncHandler)bus_sync_handler, this, NULL);   
     gst_object_unref (bus);    
 
     // set sample rate and initialize audio sample vector
@@ -149,10 +147,14 @@ bool audio_gstreamer::pause() {
         return false;
     }
 
-    gst_element_set_state (pipeline, GST_STATE_PAUSED); 
-
+    gst_element_set_state (pipeline, GST_STATE_PAUSED);   
     m_running = false;
     
+    return true;
+}
+
+bool audio_gstreamer::shutdown() {
+    m_running = false;
     return true;
 }
 
@@ -237,6 +239,6 @@ void audio_gstreamer::callback(uint8_t * stream, int len) {
     }
 }
 
-bool audio_gstreamer::poll_stream_events() {
-    return !gstreamerStopped;
+bool audio_gstreamer::is_stream_running() {
+    return m_running;
 }

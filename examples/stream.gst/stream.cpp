@@ -14,7 +14,10 @@
 #include <thread>
 #include <vector>
 #include <fstream>
+#include <iostream>
 
+static int thread_counter = 0;
+std::mutex         m_mutex; 
  
 //  500 -> 00:05.000
 // 6000 -> 01:00.000
@@ -55,9 +58,11 @@ struct whisper_params {
     std::string fname_out;
     std::string uri;
     std::string gstPipeline;
+    bool stupidServer = false;
 };
 
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
+static int run_whisper_inference(whisper_params params, whisper_context *ctx, int argc, char ** argv, int thread_id);
 
 bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
     for (int i = 1; i < argc; i++) {
@@ -86,6 +91,7 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-f"   || arg == "--file")          { params.fname_out     = argv[++i]; }
         else if (arg == "-u"   || arg == "--streamUri")     { params.uri           = argv[++i]; }
         else if (arg == "-g"   || arg == "--gstPipeline")   { params.gstPipeline   = argv[++i]; }
+        else if (arg == "-ss"  || arg == "--stupidServer")  { params.stupidServer  = true; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             whisper_print_usage(argc, argv, params);
@@ -121,7 +127,28 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  -f FNAME, --file FNAME    [%-7s] text output file name\n",                          params.fname_out.c_str());
     fprintf(stderr, "  -u URI,   --streamUri URI [%-7s] RTSP stream URI for gstreamer to read\n",          params.uri.c_str());
     fprintf(stderr, "  -g G,     --gstPipeline G [%-7s] full Gstreamer CLI syntax pipeline description\n", params.gstPipeline.c_str());
+    fprintf(stderr, "  -ss,      --stupidServer  [%-7s] Stupid Simple (stdin driven) batch Server\n",      params.stupidServer ? "true" : "false");
     fprintf(stderr, "\n");
+}
+
+
+std::vector<char> load_model_into_buffer(const char * path_model) {
+    std::ifstream file(path_model, std::ios::binary | std::ios::ate);
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    std::vector<char> buffer(size);
+    if (!file.read(buffer.data(), size))
+    {
+        fprintf(stderr, "%s: File reading into memory buffer failed for: %s\n", __func__, path_model);
+        //TODO: should stop control flow in tracks here
+    }
+    file.close();   
+    return buffer;    
+}
+
+static inline void handle_thread_header(int threadId, bool is_server_mode) {
+    if (is_server_mode && threadId != 0)
+        fprintf(stderr, "\n>>> THREAD [%d] <<<\n", threadId);
 }
 
 int main(int argc, char ** argv) {
@@ -130,6 +157,50 @@ int main(int argc, char ** argv) {
     if (whisper_params_parse(argc, argv, params) == false) {
         return 1;
     }
+
+    // 5/22/23 Shane: Moving to memory buffer, to be able to share loaded model across threads (TODO: Make whisper buffer func just use pointer)
+    whisper_context * ctx;
+    if (params.stupidServer) {
+        // Start thread for every spec line received by the "server" on stdin
+        std::vector<char> model_buffer = load_model_into_buffer(params.model.c_str());
+        std::vector<std::thread> threads;
+        for (std::string line; std::getline(std::cin, line);) {
+            char* srcType = strtok(const_cast<char*>(line.c_str()), ">");
+            char* src = strtok(NULL, ">");
+            char* dest = strtok(NULL, ">");
+            whisper_params thread_params = params;
+            if (strstr(srcType, "1") != NULL) {
+                thread_params.uri = src;
+            } else {
+                thread_params.gstPipeline = src;
+            }
+            thread_params.fname_out = dest;
+            int threadId;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                threadId = ++thread_counter;
+                handle_thread_header(threadId, params.stupidServer);
+                ctx = whisper_init_from_buffer(model_buffer.data(), model_buffer.size(), true);
+            }
+            threads.push_back(std::thread(run_whisper_inference, thread_params, ctx, argc, argv, threadId));
+        }
+        for (unsigned int threadCount = threads.size(), i = 0; i < threadCount; i++) {
+            threads[i].join();
+        }
+        return 0;
+    } else {
+        // just run the single (main) threaded execution
+        ctx = whisper_init_from_file(params.model.c_str());
+        return run_whisper_inference(params, ctx, argc, argv, 0);
+    }
+    if (ctx)
+        whisper_free(ctx);
+
+    return 0;
+}
+
+static
+int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc, char ** argv, int threadId) {
 
     params.keep_ms   = std::min(params.keep_ms,   params.step_ms);
     params.length_ms = std::max(params.length_ms, params.step_ms);
@@ -145,32 +216,7 @@ int main(int argc, char ** argv) {
 
     params.no_timestamps  = !use_vad;
     params.no_context    |= use_vad;
-    params.max_tokens     = 0;
-
-    // init audio
-
-    audio_gstreamer audio(params.length_ms);
-    if (!audio.init(&argc, &argv, 
-            !params.gstPipeline.empty()
-                ? params.gstPipeline 
-                : "rtspsrc location="+params.uri+" ! rtpmp4gdepay ! queue ! aacparse ! queue ! faad ! queue ! audioconvert ! audioresample", 
-        WHISPER_SAMPLE_RATE)) 
-    {
-        fprintf(stderr, "%s: audio.init() failed!\n", __func__);
-        return 1;
-    }
-
-    audio.resume();
-
-    // whisper init
-
-    if (params.language != "auto" && whisper_lang_id(params.language.c_str()) == -1){
-        fprintf(stderr, "error: unknown language '%s'\n", params.language.c_str());
-        whisper_print_usage(argc, argv, params);
-        exit(0);
-    }
-
-    struct whisper_context * ctx = whisper_init_from_file(params.model.c_str());
+    params.max_tokens     = 0;   
 
     std::vector<float> pcmf32    (n_samples_30s, 0.0f);
     std::vector<float> pcmf32_old;
@@ -178,86 +224,107 @@ int main(int argc, char ** argv) {
 
     std::vector<whisper_token> prompt_tokens;
 
-    // print some info about the processing
-    {
-        fprintf(stderr, "\n");
-        if (!whisper_is_multilingual(ctx)) {
-            if (params.language != "en" || params.translate) {
-                params.language = "en";
-                params.translate = false;
-                fprintf(stderr, "%s: WARNING: model is not multilingual, ignoring language and translation options\n", __func__);
-            }
-        }
-        fprintf(stderr, "%s: processing %d samples (step = %.1f sec / len = %.1f sec / keep = %.1f sec), %d threads, lang = %s, task = %s, timestamps = %d ...\n",
-                __func__,
-                n_samples_step,
-                float(n_samples_step)/WHISPER_SAMPLE_RATE,
-                float(n_samples_len )/WHISPER_SAMPLE_RATE,
-                float(n_samples_keep)/WHISPER_SAMPLE_RATE,
-                params.n_threads,
-                params.language.c_str(),
-                params.translate ? "translate" : "transcribe",
-                params.no_timestamps ? 0 : 1);
-
-        if (!use_vad) {
-            fprintf(stderr, "%s: n_new_line = %d, no_context = %d\n", __func__, n_new_line, params.no_context);
-        } else {
-            fprintf(stderr, "%s: using VAD, will transcribe on speech activity\n", __func__);
-        }
-
-        fprintf(stderr, "\n");
-    }
-
     int n_iter = 0;
 
-    bool is_running = true;
-
     std::ofstream fout;
-    if (params.fname_out.length() > 0) {
-        fout.open(params.fname_out);
-        if (!fout.is_open()) {
-            fprintf(stderr, "%s: failed to open output file '%s'!\n", __func__, params.fname_out.c_str());
+        
+    // init audio
+    audio_gstreamer *audio;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        handle_thread_header(threadId, params.stupidServer);
+
+        // create audio stream reader and start playing
+        audio = new audio_gstreamer(params.length_ms);
+        if (!audio->init(&argc, &argv, 
+                !params.gstPipeline.empty()
+                    ? params.gstPipeline 
+                    : "rtspsrc location="+params.uri+" ! rtpmp4gdepay ! queue ! aacparse ! queue ! faad ! queue ! audioconvert ! audioresample", 
+            WHISPER_SAMPLE_RATE)) 
+        {
+            fprintf(stderr, "%s: audio.init() failed!\n", __func__);
             return 1;
         }
+        audio->resume();
+
+        if (params.language != "auto" && whisper_lang_id(params.language.c_str()) == -1){
+            fprintf(stderr, "error: unknown language '%s'\n", params.language.c_str());
+            whisper_print_usage(argc, argv, params);
+            exit(0);
+        }
+
+        // print some info about the processing
+        {
+            fprintf(stderr, "\n");
+            if (!whisper_is_multilingual(ctx)) {
+                if (params.language != "en" || params.translate) {
+                    params.language = "en";
+                    params.translate = false;
+                    fprintf(stderr, "%s: WARNING: model is not multilingual, ignoring language and translation options\n", __func__);
+                }
+            }
+            fprintf(stderr, "%s: processing %d samples (step = %.1f sec / len = %.1f sec / keep = %.1f sec), %d threads, lang = %s, task = %s, timestamps = %d ...\n",
+                    __func__,
+                    n_samples_step,
+                    float(n_samples_step)/WHISPER_SAMPLE_RATE,
+                    float(n_samples_len )/WHISPER_SAMPLE_RATE,
+                    float(n_samples_keep)/WHISPER_SAMPLE_RATE,
+                    params.n_threads,
+                    params.language.c_str(),
+                    params.translate ? "translate" : "transcribe",
+                    params.no_timestamps ? 0 : 1);
+
+            if (!use_vad) {
+                fprintf(stderr, "%s: n_new_line = %d, no_context = %d\n", __func__, n_new_line, params.no_context);
+            } else {
+                fprintf(stderr, "%s: using VAD, will transcribe on speech activity\n", __func__);
+            }
+
+            fprintf(stderr, "\n");
+        }
+
+        if (params.fname_out.length() > 0) {
+            fout.open(params.fname_out);
+            if (!fout.is_open()) {
+                fprintf(stderr, "%s: failed to open output file '%s'!\n", __func__, params.fname_out.c_str());
+                return 1;
+            } else {
+                fprintf(stderr, "%s: writing output to %s\n", __func__, params.fname_out.c_str());
+            }
+        }
+
+        // print system information
+        {
+            fprintf(stderr, "system_info: n_threads = %d / %d | %s\n",
+                    params.n_threads, std::thread::hardware_concurrency(), whisper_print_system_info());
+            fprintf(stderr, "\n");
+        }   
+
+        printf("[Start speaking]\n");
+        fflush(stdout);
     }
-
-    // print system information
-    {
-        fprintf(stderr, "system_info: n_threads = %d / %d | %s\n",
-                params.n_threads, std::thread::hardware_concurrency(), whisper_print_system_info());
-        fprintf(stderr, "\n");
-    }   
-
-    printf("[Start speaking]");
-    fflush(stdout);
-
+ 
           auto t_last  = std::chrono::high_resolution_clock::now();
     const auto t_start = t_last;
 
     // main audio loop
-    while (is_running) {
-        // handle Ctrl + C
-        is_running = audio.poll_stream_events();
-
-        if (!is_running) {
-            break;
-        }
-
+    while (audio->is_stream_running()) {
         // process new audio
 
         if (!use_vad) {
             
-            while (audio.poll_stream_events()) {    // Catch error events while in this "waiting" loop
-                audio.get(params.step_ms, pcmf32_new);
+            while (audio->is_stream_running()) {    // Catch error events while in this "waiting" loop
+                audio->get(params.step_ms, pcmf32_new);
 
                 if ((int) pcmf32_new.size() > 2*n_samples_step) {
                     fprintf(stderr, "\n\n%s: WARNING: cannot process audio fast enough, dropping audio ...\n\n", __func__);
-                    audio.clear();
+                    audio->clear();
                     continue;
                 }
 
                 if ((int) pcmf32_new.size() >= n_samples_step) {
-                    audio.clear();
+                    audio->clear();
                     break;
                 }
 
@@ -290,10 +357,10 @@ int main(int argc, char ** argv) {
                 continue;
             }
 
-            audio.get(2000, pcmf32_new);
+            audio->get(2000, pcmf32_new);
 
             if (::vad_simple(pcmf32_new, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, false)) {
-                audio.get(params.length_ms, pcmf32);
+                audio->get(params.length_ms, pcmf32);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -331,23 +398,27 @@ int main(int argc, char ** argv) {
                 fprintf(stderr, "%s: failed to process audio\n", argv[0]);
                 return 6;
             }
-
+                
             // print result;
             {
-                if (!use_vad) {
-                    printf("\33[2K\r");
+                std::lock_guard<std::mutex> lock(m_mutex);
 
-                    // print long empty line to clear the previous line
-                    printf("%s", std::string(100, ' ').c_str());
+                if (!params.stupidServer) {
+                    if (!use_vad) {
+                        printf("\33[2K\r");
 
-                    printf("\33[2K\r");
-                } else {
-                    const int64_t t1 = (t_last - t_start).count()/1000000;
-                    const int64_t t0 = std::max(0.0, t1 - pcmf32.size()*1000.0/WHISPER_SAMPLE_RATE);
+                        // print long empty line to clear the previous line
+                        printf("%s", std::string(100, ' ').c_str());
 
-                    printf("\n");
-                    printf("### Transcription %d START | t0 = %d ms | t1 = %d ms\n", n_iter, (int) t0, (int) t1);
-                    printf("\n");
+                        printf("\33[2K\r");
+                    } else {
+                        const int64_t t1 = (t_last - t_start).count()/1000000;
+                        const int64_t t0 = std::max(0.0, t1 - pcmf32.size()*1000.0/WHISPER_SAMPLE_RATE);
+
+                        printf("\n");
+                        printf("### Transcription %d START | t0 = %d ms | t1 = %d ms\n", n_iter, (int) t0, (int) t1);
+                        printf("\n");
+                    }
                 }
 
                 const int n_segments = whisper_full_n_segments(ctx);
@@ -355,8 +426,10 @@ int main(int argc, char ** argv) {
                     const char * text = whisper_full_get_segment_text(ctx, i);
 
                     if (params.no_timestamps) {
-                        printf("%s", text);
-                        fflush(stdout);
+                        if (!params.stupidServer) {
+                            printf("%s", text);
+                            fflush(stdout);
+                        }
 
                         if (params.fname_out.length() > 0) {
                             fout << text;
@@ -365,28 +438,32 @@ int main(int argc, char ** argv) {
                         const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                         const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                        printf ("[%s --> %s]  %s\n", to_timestamp(t0).c_str(), to_timestamp(t1).c_str(), text);
+                        if (!params.stupidServer) {
+                            printf ("[%s --> %s]  %s\n", to_timestamp(t0).c_str(), to_timestamp(t1).c_str(), text);
+                        }
 
                         if (params.fname_out.length() > 0) {
                             fout << "[" << to_timestamp(t0) << " --> " << to_timestamp(t1) << "]  " << text << std::endl;
                         }
                     }
+
                 }
 
                 if (params.fname_out.length() > 0) {
                     fout << std::endl;
                 }
 
-                if (use_vad){
+                if (use_vad && !params.stupidServer){
                     printf("\n");
                     printf("### Transcription %d END\n", n_iter);
                 }
+                
             }
-
             ++n_iter;
 
             if (!use_vad && (n_iter % n_new_line) == 0) {
-                printf("\n");
+                if (!params.stupidServer)
+                    printf("\n");
 
                 // keep part of the audio for next iteration to try to mitigate word boundary issues
                 pcmf32_old = std::vector<float>(pcmf32.end() - n_samples_keep, pcmf32.end());
@@ -404,14 +481,22 @@ int main(int argc, char ** argv) {
                     }
                 }
             }
-            fflush(stdout);
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                fflush(stdout);
+            }
         }
     }
 
-    audio.pause();
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    whisper_print_timings(ctx);
-    whisper_free(ctx);
+        handle_thread_header(threadId, params.stupidServer);
+        whisper_print_timings(ctx);
+        whisper_free_state_from_context(ctx);
+    }
+    audio->shutdown();
+    delete audio;
 
     return 0;
 }
