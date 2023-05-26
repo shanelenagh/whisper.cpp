@@ -100,13 +100,13 @@ extern "C" {
     // Allocate (almost) all memory needed for the model.
     // Return NULL on failure
     WHISPER_API struct whisper_context * whisper_init_from_file(const char * path_model);
-    WHISPER_API struct whisper_context * whisper_init_from_buffer(void * buffer, size_t buffer_size);
+    WHISPER_API struct whisper_context * whisper_init_from_buffer(void * buffer, size_t buffer_size, bool reuse_model);
     WHISPER_API struct whisper_context * whisper_init(struct whisper_model_loader * loader);
 
     // These are the same as the above, but the internal state of the context is not allocated automatically
     // It is the responsibility of the caller to allocate the state using whisper_init_state() (#523)
     WHISPER_API struct whisper_context * whisper_init_from_file_no_state(const char * path_model);
-    WHISPER_API struct whisper_context * whisper_init_from_buffer_no_state(void * buffer, size_t buffer_size);
+    WHISPER_API struct whisper_context * whisper_init_from_buffer_no_state(void * buffer, size_t buffer_size, bool reuse_model);
     WHISPER_API struct whisper_context * whisper_init_no_state(struct whisper_model_loader * loader);
 
     WHISPER_API struct whisper_state * whisper_init_state(struct whisper_context * ctx);
@@ -132,6 +132,7 @@ extern "C" {
     WHISPER_API void whisper_free      (struct whisper_context * ctx);
     WHISPER_API void whisper_free_state(struct whisper_state * state);
     WHISPER_API void whisper_free_params(struct whisper_full_params * params);
+    WHISPER_API void whisper_free_state_from_context(struct whisper_context * ctx);
 
     // Convert RAW PCM audio to log mel spectrogram.
     // The resulting spectrogram is stored inside the default state of the provided whisper context.

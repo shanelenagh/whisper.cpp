@@ -27,6 +27,7 @@ public:
     bool resume();
     bool pause();
     bool clear();
+    bool shutdown();
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio);
@@ -35,7 +36,7 @@ public:
     void callback(uint8_t * stream, int len);
 
     // Return false if need to quit
-    bool poll_stream_events();
+    bool is_stream_running();
 
 private:
 
@@ -51,6 +52,7 @@ private:
     size_t             m_audio_pos = 0;
     size_t             m_audio_len = 0;
     std::mutex         m_mutex;    
+
 };
 
 

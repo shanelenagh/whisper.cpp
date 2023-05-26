@@ -739,6 +739,8 @@ static void log(const char * fmt, ...) {
     whisper_log(buf);
 }
 
+static whisper_context * reusable_ctx;
+
 template<typename T>
 static void read_safe(whisper_model_loader * loader, T & dest) {
     loader->read(loader->context, &dest, sizeof(T));
@@ -2847,41 +2849,57 @@ struct whisper_context * whisper_init_from_file_no_state(const char * path_model
     return ctx;
 }
 
-struct whisper_context * whisper_init_from_buffer_no_state(void * buffer, size_t buffer_size) {
-    struct buf_context {
-        uint8_t* buffer;
-        size_t size;
-        size_t current_offset;
-    };
+struct whisper_context * whisper_init_from_buffer_no_state(void * buffer, size_t buffer_size, bool reuse_model) {
+    if (!reuse_model || !reusable_ctx) {
+        struct buf_context {
+            uint8_t* buffer;
+            size_t size;
+            size_t current_offset;
+        };
 
-    buf_context ctx = { reinterpret_cast<uint8_t*>(buffer), buffer_size, 0 };
+        buf_context ctx = { reinterpret_cast<uint8_t*>(buffer), buffer_size, 0 };
 
     log("%s: loading model from buffer\n", __func__);
 
-    whisper_model_loader loader = {};
+        whisper_model_loader loader = {};
 
-    loader.context = &ctx;
+        loader.context = &ctx;
 
-    loader.read = [](void * ctx, void * output, size_t read_size) {
-        buf_context * buf = reinterpret_cast<buf_context *>(ctx);
+        loader.read = [](void * ctx, void * output, size_t read_size) {
+            buf_context * buf = reinterpret_cast<buf_context *>(ctx);
 
-        size_t size_to_copy = buf->current_offset + read_size < buf->size ? read_size : buf->size - buf->current_offset;
+            size_t size_to_copy = buf->current_offset + read_size < buf->size ? read_size : buf->size - buf->current_offset;
 
-        memcpy(output, buf->buffer + buf->current_offset, size_to_copy);
-        buf->current_offset += size_to_copy;
+            memcpy(output, buf->buffer + buf->current_offset, size_to_copy);
+            //printf("%s: copied buffer of size %ld\n", __func__, size_to_copy);
+            buf->current_offset += size_to_copy;
 
-        return size_to_copy;
-    };
+            return size_to_copy;
+        };
 
-    loader.eof = [](void * ctx) {
-        buf_context * buf = reinterpret_cast<buf_context *>(ctx);
+        loader.eof = [](void * ctx) {
+            buf_context * buf = reinterpret_cast<buf_context *>(ctx);
 
-        return buf->current_offset >= buf->size;
-    };
+            return buf->current_offset >= buf->size;
+        };
 
-    loader.close = [](void * /*ctx*/) { };
+        loader.close = [](void * /*ctx*/) { };
 
-    return whisper_init_no_state(&loader);
+        whisper_context * wctx = whisper_init_no_state(&loader);
+        //printf("\n\nDONE INITIALIZING, model size %ld and vocab %ld and state %ld\n\n", sizeof(wctx->model), sizeof(wctx->vocab), sizeof(wctx->state));
+
+        if (reuse_model)
+            reusable_ctx = wctx;
+
+        return wctx;
+    } else {
+        //printf("%s: Reusing context\n", __func__);
+        whisper_context * wctx = new whisper_context;
+        wctx->model = reusable_ctx->model;
+        wctx->vocab = reusable_ctx->vocab;
+        //printf("\n\nREUSING, model size %ld and vocab %ld and state %ld\n\n", sizeof(wctx->model), sizeof(wctx->vocab), sizeof(wctx->state));
+        return wctx;
+    }
 }
 
 struct whisper_context * whisper_init_no_state(struct whisper_model_loader * loader) {
@@ -2916,8 +2934,8 @@ struct whisper_context * whisper_init_from_file(const char * path_model) {
     return ctx;
 }
 
-struct whisper_context * whisper_init_from_buffer(void * buffer, size_t buffer_size) {
-    whisper_context * ctx = whisper_init_from_buffer_no_state(buffer, buffer_size);
+struct whisper_context * whisper_init_from_buffer(void * buffer, size_t buffer_size, bool reuse_model) {
+    whisper_context * ctx = whisper_init_from_buffer_no_state(buffer, buffer_size, reuse_model);
     if (!ctx) {
         return nullptr;
     }
@@ -2971,6 +2989,11 @@ void whisper_free_state(struct whisper_state * state)
 
         delete state;
     }
+}
+
+void whisper_free_state_from_context(struct whisper_context * ctx)
+{
+    whisper_free_state(ctx->state);
 }
 
 void whisper_free(struct whisper_context * ctx) {
