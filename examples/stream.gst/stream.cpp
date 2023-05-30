@@ -240,7 +240,7 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
         if (!audio->init(&argc, &argv, 
                 !params.gstPipeline.empty()
                     ? params.gstPipeline 
-                    : "rtspsrc location="+params.uri+" ! rtpmp4gdepay ! queue ! aacparse ! queue ! faad ! queue ! audioconvert ! audioresample", 
+                    : "rtspsrc location="+params.uri+" ! rtpmp4gdepay ! queue ! aacparse ! faad ! audioconvert ! audioresample", 
             WHISPER_SAMPLE_RATE)) 
         {
             fprintf(stderr, "%s: audio.init() failed!\n", __func__);
