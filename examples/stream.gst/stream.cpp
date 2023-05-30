@@ -59,6 +59,7 @@ struct whisper_params {
     std::string uri;
     std::string gstPipeline;
     bool stupidServer = false;
+    std::string doneCommand;    
 };
 
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
@@ -92,6 +93,7 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-u"   || arg == "--streamUri")     { params.uri           = argv[++i]; }
         else if (arg == "-g"   || arg == "--gstPipeline")   { params.gstPipeline   = argv[++i]; }
         else if (arg == "-ss"  || arg == "--stupidServer")  { params.stupidServer  = true; }
+        else if (arg == "-dc"  || arg == "--doneCommand")   { params.doneCommand   = argv[++i]; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             whisper_print_usage(argc, argv, params);
@@ -128,9 +130,25 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  -u URI,   --streamUri URI [%-7s] RTSP stream URI for gstreamer to read\n",          params.uri.c_str());
     fprintf(stderr, "  -g G,     --gstPipeline G [%-7s] full Gstreamer CLI syntax pipeline description\n", params.gstPipeline.c_str());
     fprintf(stderr, "  -ss,      --stupidServer  [%-7s] Stupid Simple (stdin driven) batch Server\n",      params.stupidServer ? "true" : "false");
+    fprintf(stderr, "  -dc C,    --doneCommand C [%-7s] Callback command to execute when done/exiting\n",  params.doneCommand.c_str());    
     fprintf(stderr, "\n");
 }
 
+/* Can't believe there isn't a standard split API call that works with multi-char delims */
+static inline
+std::vector<std::string> parse_server_line(const std::string line, const std::string delim) {
+    std::vector<std::string> results;
+    if (line.empty())
+        return results;
+    size_t startIdx = 0, delimIdx = line.find(delim), len;
+    do {
+        len = (delimIdx != std::string::npos ? delimIdx : line.length()) - startIdx;
+        results.push_back(line.substr(startIdx, len));
+        startIdx = startIdx + len + delim.length();
+        delimIdx = line.find(delim, startIdx);
+    } while (startIdx < line.length());
+    return results;
+}
 
 std::vector<char> load_model_into_buffer(const char * path_model) {
     std::ifstream file(path_model, std::ios::binary | std::ios::ate);
@@ -158,23 +176,28 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    // 5/22/23 Shane: Moving to memory buffer, to be able to share loaded model across threads (TODO: Make whisper buffer func just use pointer)
+    // 5/22/23 Shane: Moving to memory buffer, to be able to share loaded model across threads
     whisper_context * ctx;
     if (params.stupidServer) {
         // Start thread for every spec line received by the "server" on stdin
         std::vector<char> model_buffer = load_model_into_buffer(params.model.c_str());
         std::vector<std::thread> threads;
         for (std::string line; std::getline(std::cin, line);) {
-            char* srcType = strtok(const_cast<char*>(line.c_str()), ">");
-            char* src = strtok(NULL, ">");
-            char* dest = strtok(NULL, ">");
-            whisper_params thread_params = params;
-            if (strstr(srcType, "1") != NULL) {
-                thread_params.uri = src;
-            } else {
-                thread_params.gstPipeline = src;
+            std::vector<std::string> parsedLine = parse_server_line(line, ">>");          
+            if (parsedLine.size() < 3) {
+                fprintf(stderr, "ERROR: Can't parse server input line (format = 'srcType>>src>>destFile[>>callbackCommand]'): %s\n", line.c_str());
+                continue;
             }
-            thread_params.fname_out = dest;
+            whisper_params thread_params = params;
+            if (parsedLine[0].find("1") != std::string::npos) {
+                thread_params.uri = parsedLine[1];
+            } else {
+                thread_params.gstPipeline = parsedLine[1];
+            }   
+            thread_params.fname_out = parsedLine[2];            
+            if (parsedLine.size() > 3) {
+                thread_params.doneCommand = parsedLine[3];
+            }
             int threadId;
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
@@ -497,6 +520,12 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
     }
     audio->shutdown();
     delete audio;
+
+    if (params.doneCommand.length() > 0) {
+        int result = system(params.doneCommand.c_str());
+        fprintf(stderr, "%s: 'done' callback returned [%d] for command: %s\n", __func__, result, params.doneCommand.c_str());
+
+    }
 
     return 0;
 }
