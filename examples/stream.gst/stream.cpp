@@ -57,9 +57,9 @@ struct whisper_params {
     std::string model     = "models/ggml-base.en.bin";
     std::string fname_out;
     std::string uri;
-    std::string gstPipeline;
-    bool stupidServer = false;
-    std::string doneCommand;    
+    std::string gst_pipeline;
+    bool simple_server = false;
+    std::string done_cb_cmd;    
 };
 
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
@@ -91,9 +91,9 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-m"   || arg == "--model")         { params.model         = argv[++i]; }
         else if (arg == "-f"   || arg == "--file")          { params.fname_out     = argv[++i]; }
         else if (arg == "-u"   || arg == "--streamUri")     { params.uri           = argv[++i]; }
-        else if (arg == "-g"   || arg == "--gstPipeline")   { params.gstPipeline   = argv[++i]; }
-        else if (arg == "-ss"  || arg == "--stupidServer")  { params.stupidServer  = true; }
-        else if (arg == "-dc"  || arg == "--doneCommand")   { params.doneCommand   = argv[++i]; }
+        else if (arg == "-g"   || arg == "--gstPipeline")   { params.gst_pipeline  = argv[++i]; }
+        else if (arg == "-ss"  || arg == "--simpleServer")  { params.simple_server = true; }
+        else if (arg == "-dc"  || arg == "--doneCallback")  { params.done_cb_cmd   = argv[++i]; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             whisper_print_usage(argc, argv, params);
@@ -109,28 +109,28 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "usage: %s [options]\n", argv[0]);
     fprintf(stderr, "\n");
     fprintf(stderr, "options:\n");
-    fprintf(stderr, "  -h,       --help          [default] show this help message and exit\n");
-    fprintf(stderr, "  -t N,     --threads N     [%-7d] number of threads to use during computation\n",    params.n_threads);
-    fprintf(stderr, "            --step N        [%-7d] audio step size in milliseconds\n",                params.step_ms);
-    fprintf(stderr, "            --length N      [%-7d] audio length in milliseconds\n",                   params.length_ms);
-    fprintf(stderr, "            --keep N        [%-7d] audio to keep from previous step in ms\n",         params.keep_ms);
-    fprintf(stderr, "  -c ID,    --capture ID    [%-7d] capture device ID\n",                              params.capture_id);
-    fprintf(stderr, "  -mt N,    --max-tokens N  [%-7d] maximum number of tokens per audio chunk\n",       params.max_tokens);
-    fprintf(stderr, "  -ac N,    --audio-ctx N   [%-7d] audio context size (0 - all)\n",                   params.audio_ctx);
-    fprintf(stderr, "  -vth N,   --vad-thold N   [%-7.2f] voice activity detection threshold\n",           params.vad_thold);
-    fprintf(stderr, "  -fth N,   --freq-thold N  [%-7.2f] high-pass frequency cutoff\n",                   params.freq_thold);
-    fprintf(stderr, "  -su,      --speed-up      [%-7s] speed up audio by x2 (reduced accuracy)\n",        params.speed_up ? "true" : "false");
-    fprintf(stderr, "  -tr,      --translate     [%-7s] translate from source language to english\n",      params.translate ? "true" : "false");
-    fprintf(stderr, "  -nf,      --no-fallback   [%-7s] do not use temperature fallback while decoding\n", params.no_fallback ? "true" : "false");
-    fprintf(stderr, "  -ps,      --print-special [%-7s] print special tokens\n",                           params.print_special ? "true" : "false");
-    fprintf(stderr, "  -kc,      --keep-context  [%-7s] keep context between audio chunks\n",              params.no_context ? "false" : "true");
-    fprintf(stderr, "  -l LANG,  --language LANG [%-7s] spoken language\n",                                params.language.c_str());
-    fprintf(stderr, "  -m FNAME, --model FNAME   [%-7s] model path\n",                                     params.model.c_str());
-    fprintf(stderr, "  -f FNAME, --file FNAME    [%-7s] text output file name\n",                          params.fname_out.c_str());
-    fprintf(stderr, "  -u URI,   --streamUri URI [%-7s] RTSP stream URI for gstreamer to read\n",          params.uri.c_str());
-    fprintf(stderr, "  -g G,     --gstPipeline G [%-7s] full Gstreamer CLI syntax pipeline description\n", params.gstPipeline.c_str());
-    fprintf(stderr, "  -ss,      --stupidServer  [%-7s] Stupid Simple (stdin driven) batch Server\n",      params.stupidServer ? "true" : "false");
-    fprintf(stderr, "  -dc C,    --doneCommand C [%-7s] Callback command to execute when done/exiting\n",  params.doneCommand.c_str());    
+    fprintf(stderr, "  -h,       --help           [default] show this help message and exit\n");
+    fprintf(stderr, "  -t N,     --threads N      [%-7d] number of threads to use during computation\n",    params.n_threads);
+    fprintf(stderr, "            --step N         [%-7d] audio step size in milliseconds\n",                params.step_ms);
+    fprintf(stderr, "            --length N       [%-7d] audio length in milliseconds\n",                   params.length_ms);
+    fprintf(stderr, "            --keep N         [%-7d] audio to keep from previous step in ms\n",         params.keep_ms);
+    fprintf(stderr, "  -c ID,    --capture ID     [%-7d] capture device ID\n",                              params.capture_id);
+    fprintf(stderr, "  -mt N,    --max-tokens N   [%-7d] maximum number of tokens per audio chunk\n",       params.max_tokens);
+    fprintf(stderr, "  -ac N,    --audio-ctx N    [%-7d] audio context size (0 - all)\n",                   params.audio_ctx);
+    fprintf(stderr, "  -vth N,   --vad-thold N    [%-7.2f] voice activity detection threshold\n",           params.vad_thold);
+    fprintf(stderr, "  -fth N,   --freq-thold N   [%-7.2f] high-pass frequency cutoff\n",                   params.freq_thold);
+    fprintf(stderr, "  -su,      --speed-up       [%-7s] speed up audio by x2 (reduced accuracy)\n",        params.speed_up ? "true" : "false");
+    fprintf(stderr, "  -tr,      --translate      [%-7s] translate from source language to english\n",      params.translate ? "true" : "false");
+    fprintf(stderr, "  -nf,      --no-fallback    [%-7s] do not use temperature fallback while decoding\n", params.no_fallback ? "true" : "false");
+    fprintf(stderr, "  -ps,      --print-special  [%-7s] print special tokens\n",                           params.print_special ? "true" : "false");
+    fprintf(stderr, "  -kc,      --keep-context   [%-7s] keep context between audio chunks\n",              params.no_context ? "false" : "true");
+    fprintf(stderr, "  -l LANG,  --language LANG  [%-7s] spoken language\n",                                params.language.c_str());
+    fprintf(stderr, "  -m FNAME, --model FNAME    [%-7s] model path\n",                                     params.model.c_str());
+    fprintf(stderr, "  -f FNAME, --file FNAME     [%-7s] text output file name\n",                          params.fname_out.c_str());
+    fprintf(stderr, "  -u URI,   --streamUri URI  [%-7s] RTSP stream URI for gstreamer to read\n",          params.uri.c_str());
+    fprintf(stderr, "  -g G,     --gstPipeline G  [%-7s] full Gstreamer CLI syntax pipeline description\n", params.gst_pipeline.c_str());
+    fprintf(stderr, "  -ss,      --simpleServer   [%-7s] Simple (stdin driven) threaded batch server\n",    params.simple_server ? "true" : "false");
+    fprintf(stderr, "  -dc C,    --doneCallback C [%-7s] Callback command to execute when done/exiting\n",  params.done_cb_cmd.c_str());    
     fprintf(stderr, "\n");
 }
 
@@ -179,7 +179,7 @@ int main(int argc, char ** argv) {
 
     // 5/22/23 Shane: Moving to memory buffer, to be able to share loaded model across threads
     whisper_context * ctx;
-    if (params.stupidServer) {
+    if (params.simple_server) {
         // Start thread for every spec line received by the "server" on stdin
         std::vector<char> model_buffer = load_model_into_buffer(params.model.c_str());
         std::vector<std::thread> threads;
@@ -193,17 +193,17 @@ int main(int argc, char ** argv) {
             if (parsedLine[0].find("1") != std::string::npos) {
                 thread_params.uri = parsedLine[1];
             } else {
-                thread_params.gstPipeline = parsedLine[1];
+                thread_params.gst_pipeline = parsedLine[1];
             }   
             thread_params.fname_out = parsedLine[2];            
             if (parsedLine.size() > 3) {
-                thread_params.doneCommand = parsedLine[3];
+                thread_params.done_cb_cmd = parsedLine[3];
             }
             int threadId;
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 threadId = ++thread_counter;
-                handle_thread_header(threadId, params.stupidServer);
+                handle_thread_header(threadId, params.simple_server);
                 ctx = whisper_init_from_buffer(model_buffer.data(), model_buffer.size(), true);
             }
             threads.push_back(std::thread(run_whisper_inference, thread_params, ctx, argc, argv, threadId));
@@ -257,13 +257,13 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
-        handle_thread_header(threadId, params.stupidServer);
+        handle_thread_header(threadId, params.simple_server);
 
         // create audio stream reader and start playing
         audio = new audio_gstreamer(params.length_ms);
         if (!audio->init(&argc, &argv, 
-                !params.gstPipeline.empty()
-                    ? params.gstPipeline 
+                !params.gst_pipeline.empty()
+                    ? params.gst_pipeline 
                     : "rtspsrc location="+params.uri+" ! rtpmp4gdepay ! queue ! aacparse ! faad ! audioconvert ! audioresample", 
             WHISPER_SAMPLE_RATE)) 
         {
@@ -325,7 +325,11 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
             fprintf(stderr, "\n");
         }   
 
-        printf("[Start speaking]\n");
+        if (params.fname_out.length() > 0) {
+            printf("[Starting transcription]\n");
+        } else {
+            printf("[Start speaking]\n");
+        }
         fflush(stdout);
     }
  
@@ -427,7 +431,7 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
 
-                if (!params.stupidServer) {
+                if (!params.simple_server) {
                     if (!use_vad) {
                         printf("\33[2K\r");
 
@@ -450,7 +454,7 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
                     const char * text = whisper_full_get_segment_text(ctx, i);
 
                     if (params.no_timestamps) {
-                        if (!params.stupidServer) {
+                        if (!params.simple_server) {
                             printf("%s", text);
                             fflush(stdout);
                         }
@@ -462,7 +466,7 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
                         const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                         const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                        if (!params.stupidServer) {
+                        if (!params.simple_server) {
                             printf ("[%s --> %s]  %s\n", to_timestamp(t0).c_str(), to_timestamp(t1).c_str(), text);
                         }
 
@@ -477,7 +481,7 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
                     fout << std::endl;
                 }
 
-                if (use_vad && !params.stupidServer){
+                if (use_vad && !params.simple_server){
                     printf("\n");
                     printf("### Transcription %d END\n", n_iter);
                 }
@@ -486,7 +490,7 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
             ++n_iter;
 
             if (!use_vad && (n_iter % n_new_line) == 0) {
-                if (!params.stupidServer)
+                if (!params.simple_server)
                     printf("\n");
 
                 // keep part of the audio for next iteration to try to mitigate word boundary issues
@@ -515,16 +519,16 @@ int run_whisper_inference(whisper_params params, whisper_context * ctx, int argc
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
-        handle_thread_header(threadId, params.stupidServer);
+        handle_thread_header(threadId, params.simple_server);
         whisper_print_timings(ctx);
         whisper_free_state_from_context(ctx);
     }
     audio->shutdown();
     delete audio;
 
-    if (params.doneCommand.length() > 0) {
-        int result = system(params.doneCommand.c_str());
-        fprintf(stderr, "%s: 'done' callback returned [%d] for command: %s\n", __func__, result, params.doneCommand.c_str());
+    if (params.done_cb_cmd.length() > 0) {
+        int result = system(params.done_cb_cmd.c_str());
+        fprintf(stderr, "%s: 'done' callback returned [%d] for command: %s\n", __func__, result, params.done_cb_cmd.c_str());
 
     }
 
