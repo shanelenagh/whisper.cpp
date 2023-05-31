@@ -47,7 +47,7 @@ static GstFlowReturn gstreamer_new_sample (GstElement *sink, audio_gstreamer *st
 }
 
 /* Non-threaded (no GLib mainloop) synchronous message handler */
-static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, audio_gstreamer* gstreamer) {
+static GstBusSyncReply audio_gstreamer_bus_sync_handler(GstBus *bus, GstMessage *msg, audio_gstreamer* gstreamer) {
   switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_ERROR:
       GError *err;
@@ -117,7 +117,7 @@ bool audio_gstreamer::init(int* argc, char*** argv, std::string pipelineDescript
     /* Instruct the bus to emit signals for each received message, and connect to the interesting signals */
     GstBus *bus = gst_element_get_bus (pipeline);
     gst_bus_add_signal_watch (bus);
-    gst_bus_set_sync_handler(bus, (GstBusSyncHandler)bus_sync_handler, this, NULL);   
+    gst_bus_set_sync_handler(bus, (GstBusSyncHandler)audio_gstreamer_bus_sync_handler, this, NULL);   
     gst_object_unref (bus);    
 
     // set sample rate and initialize audio sample vector
