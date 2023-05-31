@@ -136,17 +136,18 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
 
 /* Can't believe there isn't a standard split API call that works with multi-char delims */
 static inline
-std::vector<std::string> parse_server_line(const std::string line, const std::string delim) {
+std::vector<std::string> parse_delimited_line(const std::string line, const std::string delim) {
     std::vector<std::string> results;
     if (line.empty())
         return results;
-    size_t startIdx = 0, delimIdx = line.find(delim), len;
+    const size_t line_len = line.length(), delim_len = delim.length();
+    size_t startIdx = 0, delimIdx = line.find(delim), parsed_len;
     do {
-        len = (delimIdx != std::string::npos ? delimIdx : line.length()) - startIdx;
-        results.push_back(line.substr(startIdx, len));
-        startIdx = startIdx + len + delim.length();
+        parsed_len = (delimIdx != std::string::npos ? delimIdx : line_len) - startIdx;
+        results.push_back(line.substr(startIdx, parsed_len));
+        startIdx = startIdx + parsed_len + delim_len;
         delimIdx = line.find(delim, startIdx);
-    } while (startIdx < line.length());
+    } while (startIdx < line_len);
     return results;
 }
 
@@ -183,7 +184,7 @@ int main(int argc, char ** argv) {
         std::vector<char> model_buffer = load_model_into_buffer(params.model.c_str());
         std::vector<std::thread> threads;
         for (std::string line; std::getline(std::cin, line);) {
-            std::vector<std::string> parsedLine = parse_server_line(line, ">>");          
+            std::vector<std::string> parsedLine = parse_delimited_line(line, ">>");          
             if (parsedLine.size() < 3) {
                 fprintf(stderr, "ERROR: Can't parse server input line (format = 'srcType>>src>>destFile[>>callbackCommand]'): %s\n", line.c_str());
                 continue;
