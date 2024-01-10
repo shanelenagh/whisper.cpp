@@ -17,7 +17,7 @@ public:
     audio_async(int len_ms);
     ~audio_async();
 
-    bool init(int capture_id, int sample_rate);
+    bool init(int server_port, int sample_rate);
 
     // start capturing audio via the provided SDL callback
     // keep last len_ms seconds of audio in a circular buffer

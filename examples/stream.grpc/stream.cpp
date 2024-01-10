@@ -153,7 +153,7 @@ int main(int argc, char ** argv) {
     // init audio
 
     audio_async audio(params.length_ms);
-    if (!audio.init(params.capture_id, WHISPER_SAMPLE_RATE)) {
+    if (!audio.init(500001 /*TODO: get server port from CLI */, WHISPER_SAMPLE_RATE)) {
         fprintf(stderr, "%s: audio.init() failed!\n", __func__);
         return 1;
     }

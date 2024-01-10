@@ -1,5 +1,64 @@
 #include "common-grpc.h"
 
+#include <grpcpp/ext/proto_server_reflection_plugin.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/health_check_service_interface.h>
+#include <fstream>
+#include <string>
+#include <iostream>
+
+
+
+#include "transcription.grpc.pb.h"
+
+
+using grpc::Server;
+using grpc::ServerBuilder;
+using grpc::ServerContext;
+using grpc::ServerReader;
+using grpc::ServerReaderWriter;
+using grpc::ServerWriter;
+using grpc::Status;
+using sigper::transcription::AudioTranscription;
+using sigper::transcription::AudioSegmentRequest;
+using sigper::transcription::TranscriptResponse;
+
+/*
+// Transcription service implementation
+class AudioTranscriptionServiceImpl final : public AudioTranscription::Service {
+
+  Status TranscribeAudio(ServerContext* context,
+                   ServerReaderWriter<TranscriptResponse, AudioSegmentRequest>* stream) override 
+  {
+    std::cout << "Got request\n";
+    AudioSegmentRequest audio;
+    while (stream->Read(&audio)) {
+      std::cout << "Read one with data: " << audio.audio_data() << "\n";
+      ++seq_num;
+      std::cout << "Now writing to file " << seq_num << ".bin\n";
+      std::ofstream fout;
+      fout.open(std::to_string(seq_num)+".bin", std::ios::binary | std::ios::out);
+      fout.write(audio.audio_data().data(), audio.audio_data().length());
+      fout.close();
+
+      TranscriptResponse transcript;
+      transcript.set_seq_num(seq_num);
+      transcript.set_transcription("Got message");
+      stream->Write(transcript);
+      std::cout << "Wrote response";
+      //stream->WritesDone();
+    }    
+
+    std::cout << "Returning";
+
+    return Status::OK;
+  }
+
+  private:
+    int seq_num = 0;
+};
+*/
+
 audio_async::audio_async(int len_ms) {
     m_len_ms = len_ms;
 
@@ -12,7 +71,7 @@ audio_async::~audio_async() {
     // }
 }
 
-bool audio_async::init(int capture_id, int sample_rate) {
+bool audio_async::init(int server_port, int sample_rate) {
     // SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     // if (SDL_Init(SDL_INIT_AUDIO) < 0) {
@@ -227,3 +286,5 @@ bool sdl_poll_events() {
 
     return true;
 }
+
+

@@ -49,35 +49,31 @@ set(sg_common_hdrs "${CMAKE_CURRENT_BINARY_DIR}/common-grpc.h")
 # Include generated *.pb.h files
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
-add_library(sg_grpc_proto
+add_library(sg_grpc_common
   ${sg_grpc_srcs}
   ${sg_grpc_hdrs}
   ${sg_proto_srcs}
   ${sg_proto_hdrs}
-)
-add_library(sg_common
   ${sg_common_srcs}
-  ${sg_common_hdrs}
+  ${sg_common_hdrs}  
 )
-target_link_libraries(sg_grpc_proto
+target_link_libraries(sg_grpc_common
   ${_REFLECTION}
   ${_GRPC_GRPCPP}
   ${_PROTOBUF_LIBPROTOBUF})
+  
 
 
 set(TARGET stream.grpc)
 add_executable(${TARGET} stream.cpp)
 
-include(DefaultTargetOptions)
+#include(DefaultTargetOptions)
 
 target_link_libraries(${TARGET} PRIVATE 
   common 
   whisper 
   ${CMAKE_THREAD_LIBS_INIT}
-    sg_grpc_proto
-    sg_common
-    absl::flags
-    absl::flags_parse
+    sg_grpc_common
     ${_REFLECTION}
     ${_GRPC_GRPCPP}
     ${_PROTOBUF_LIBPROTOBUF}  
