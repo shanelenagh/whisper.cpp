@@ -53,20 +53,20 @@ class AsynchTranscriptionData {
                 service_->RequestTranscribeAudio(&ctx_, &bidiStream_, cq_, cq_,
                                         this);
                 std::cout << "Made our request to start processing" << std::endl;
+                bidiStream_.Read(&request_, this);
+                std::cout << "Here is what I got for audio: " ;
+                std::cout << request_.audio_data() << " of size " << request_.audio_data().size() << std::endl;                
             } else if (status_ == PROCESS) {
                 std::cout << "Oh boy, we are processing now!" << std::endl;
-                /*
                 // Spawn a new CallData instance to serve new clients while we process
                 // the one for this CallData. The instance will deallocate itself as
                 // part of its FINISH state.
-                new CallData(service_, cq_);
-                NM: SHANE: NOOOOO!!! We don't want this to handle multiple requests, so ignore them
-                */
                 new AsynchTranscriptionData(service_, cq_);
 
-                bidiStream_.Read(&request_, this);
-
-                std::cout << "Here is what I got for audio: " << request_.audio_data() << " of size " << request_.audio_data().size() << std::endl;
+                
+                //bidiStream_.Read(&request_, this);
+                //std::cout << "Here is what I got for audio: " 
+                //std::cout << request_.audio_data() << " of size " << request_.audio_data().size() << std::endl;
 
                 // The actual processing.
                 response_.set_transcription("hey from the async-server-land!: "+request_.audio_data());
@@ -171,30 +171,37 @@ bool audio_async::init(int server_port, int sample_rate) {
     // Register "service" as the instance through which we'll communicate with
     // clients. In this case it corresponds to an *synchronous* service.
     //m_service = std::make_unique<AudioTranscriptionServiceImpl>(this);
-    
+
+    builder.RegisterService(&m_service);
+    mup_cq = builder.AddCompletionQueue();
+    mup_server = builder.BuildAndStart();
+
     // SYNCH CALL
-    //builder.RegisterService(&m_service);
     // Finally assemble the server.
     //std::unique_ptr<Server> server(builder.BuildAndStart());
     //std::cout << "Server listening on " << server_address << std::endl;
 
     // ASYNCH SEMATICS
-    // m_service = std::make_unique<AudioTranscription::AsyncService>();
-    // builder.RegisterService(m_service.get());
-    // m_cq = builder.AddCompletionQueue();
-    // m_server = builder.BuildAndStart();
     // std::cout << "Server listening on " << server_address << std::endl;
     // HandleRpcs();
 
-    // ASYNC gist
-    builder.RegisterService(&m_service);
-    mup_cq = builder.AddCompletionQueue();
-    mup_server = builder.BuildAndStart();
+    // ASYNC example - WORKS! :-)
+    //HandleRpcs();
 
-    HandleRpcs();
-    // mup_stream.reset(
-    //     new ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>(&m_context));
-    // m_service.Reque
+    // ASYNC Gist
+        // This initiates a single stream for a single client. To allow multiple
+        // clients in different threads to connect, simply 'request' from the
+        // different threads. Each stream is independent but can use the same
+        // completion queue/context objects.
+
+    mup_stream.reset(
+        new ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>(&m_context));
+    m_service.RequestTranscribeAudio(&m_context, mup_stream.get(), mup_cq.get(), mup_cq.get(),
+        reinterpret_cast<void*>(Type::CONNECT));    
+    m_context.AsyncNotifyWhenDone(reinterpret_cast<void*>(Type::DONE));
+    grpc_thread_.reset(new std::thread(
+        (std::bind(&audio_async::GrpcThread, this))));   
+    std::cout << "Server listening on " << server_address << std::endl;    
 
 
     m_running = true;
@@ -202,6 +209,80 @@ bool audio_async::init(int server_port, int sample_rate) {
 
     return true;
 }
+
+
+
+
+//
+// BEGIN GIST
+//
+void audio_async::GrpcThread() {
+    std::cout << "GRPC thread running" << std::endl;    
+
+    while (true) {
+        void* got_tag = nullptr;
+        bool ok = false;
+        if (!mup_cq->Next(&got_tag, &ok)) {
+            std::cerr << "Server stream closed. Quitting" << std::endl;
+            break;
+        }
+
+        //assert(ok);
+
+        if (ok) {
+            std::cout << std::endl
+                << "**** Processing completion queue tag " << got_tag
+                << std::endl;
+            switch (static_cast<Type>(reinterpret_cast<size_t>(got_tag))) {
+            case Type::READ:
+                std::cout << "Read a new message." << std::endl;
+                AsyncSendResponse();
+                break;
+            case Type::WRITE:
+                std::cout << "Sending message (async)." << std::endl;
+                AsyncWaitForRequest();
+                break;
+            case Type::CONNECT:
+                std::cout << "Client connected." << std::endl;
+                AsyncWaitForRequest();
+                break;
+            case Type::DONE:
+                std::cout << "Server disconnecting." << std::endl;
+                m_running = false;
+                break;
+            case Type::FINISH:
+                std::cout << "Server quitting." << std::endl;
+                break;
+            default:
+                std::cerr << "Unexpected tag " << got_tag << std::endl;
+                assert(false);
+            }
+        }
+    }
+}
+
+void audio_async::AsyncWaitForRequest() {
+    if (is_running()) {
+        // In the case of the server, we wait for a READ first and then write a
+        // response. A server cannot initiate a connection so the server has to
+        // wait for the client to send a message in order for it to respond back.
+        mup_stream->Read(&m_request, reinterpret_cast<void*>(Type::READ));
+        std::cout << "Read request with data: " << m_request.audio_data();
+    }
+}
+
+void audio_async::AsyncSendResponse() {
+    std::cout << " ** Handling request: " << m_request.audio_data() << std::endl;
+    TranscriptResponse response;
+    std::string resp = "I hear you: " + m_request.audio_data();
+    std::cout << " ** Sending response: " << resp << std::endl;
+    response.set_transcription(resp);
+    mup_stream->Write(response, reinterpret_cast<void*>(Type::WRITE));
+}
+//
+// END GIST
+//
+
 
 void audio_async::HandleRpcs() {
 

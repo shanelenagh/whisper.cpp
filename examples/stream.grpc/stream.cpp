@@ -158,6 +158,10 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+        // Shane: Nah, just wait....
+        //std::cout << "GOING TO SLEEP IN WHISPER STREAMER\n";
+        //std::this_thread::sleep_for(std::chrono::seconds(1000));    
+
     audio.resume();
 
     // whisper init
@@ -251,6 +255,7 @@ int main(int argc, char ** argv) {
         }
 
         // process new audio
+        
 
         if (!use_vad) {
             while (true) {

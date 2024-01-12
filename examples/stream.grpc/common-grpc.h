@@ -6,6 +6,7 @@
 #include <vector>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #include "transcription.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
@@ -51,6 +52,11 @@ private:
     //SDL_AudioDeviceID m_dev_id_in = 0;
     void HandleRpcs();
 
+    //gist stuff
+    void GrpcThread();
+    void AsyncWaitForRequest();
+    void AsyncSendResponse();
+
     int seq_num = 0;
     int m_len_ms = 0;
     int m_sample_rate = 0;
@@ -73,7 +79,6 @@ private:
     AudioTranscription::AsyncService m_service;
     AudioSegmentRequest m_request;
 
-
-
-
+    //gist stuff
+    std::unique_ptr<std::thread> grpc_thread_;
 };
