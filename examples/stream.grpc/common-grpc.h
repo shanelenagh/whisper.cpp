@@ -56,6 +56,8 @@ private:
     void GrpcThread();
     void AsyncWaitForRequest();
     void AsyncSendResponse();
+    void StartAsyncService(std::string server_address);
+    void Shutdown();
 
     int seq_num = 0;
     int m_len_ms = 0;
@@ -76,9 +78,10 @@ private:
     std::unique_ptr<ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>> mup_stream;
     ServerContext m_context;
     // Transcription service classes
-    AudioTranscription::AsyncService m_service;
+    std::unique_ptr<AudioTranscription::AsyncService> mup_service;
     AudioSegmentRequest m_request;
 
     //gist stuff
-    std::unique_ptr<std::thread> grpc_thread_;
+    std::unique_ptr<std::thread> mup_grpc_thread;
+    std::string m_server_address;
 };

@@ -26,87 +26,6 @@ using sigper::transcription::TranscriptResponse;
 
 enum class Type { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
 
-class AsynchTranscriptionData {
-    public:
-
-        // Take in the "service" instance (in this case representing an asynchronous
-        // server) and the completion queue "cq" used for asynchronous communication
-        // with the gRPC runtime.
-        AsynchTranscriptionData(AudioTranscription::AsyncService* service, ServerCompletionQueue* cq)
-            : service_(service), cq_(cq), bidiStream_(&ctx_), status_(CREATE) {
-        // Invoke the serving logic right away.
-        Proceed();
-        }
-
-        void Proceed() {
-            std::cout << "Proceeding, my friend!" << std::endl;
-
-            if (status_ == CREATE) {
-                // Make this instance progress to the PROCESS state.
-                status_ = PROCESS;
-                std::cout << "CREATE, so making our request to start processing" << std::endl;
-                // As part of the initial CREATE state, we *request* that the system
-                // start processing SayHello requests. In this request, "this" acts are
-                // the tag uniquely identifying the request (so that different CallData
-                // instances can serve different requests concurrently), in this case
-                // the memory address of this CallData instance.
-                service_->RequestTranscribeAudio(&ctx_, &bidiStream_, cq_, cq_,
-                                        this);
-                std::cout << "Made our request to start processing" << std::endl;
-                bidiStream_.Read(&request_, this);
-                std::cout << "Here is what I got for audio: " ;
-                std::cout << request_.audio_data() << " of size " << request_.audio_data().size() << std::endl;                
-            } else if (status_ == PROCESS) {
-                std::cout << "Oh boy, we are processing now!" << std::endl;
-                // Spawn a new CallData instance to serve new clients while we process
-                // the one for this CallData. The instance will deallocate itself as
-                // part of its FINISH state.
-                new AsynchTranscriptionData(service_, cq_);
-
-                
-                //bidiStream_.Read(&request_, this);
-                //std::cout << "Here is what I got for audio: " 
-                //std::cout << request_.audio_data() << " of size " << request_.audio_data().size() << std::endl;
-
-                // The actual processing.
-                response_.set_transcription("hey from the async-server-land!: "+request_.audio_data());
-
-                // And we are done! Let the gRPC runtime know we've finished, using the
-                // memory address of this instance as the uniquely identifying tag for
-                // the event.
-                status_ = FINISH;
-                bidiStream_.Write(response_, this);
-                
-            } else {
-                GPR_ASSERT(status_ == FINISH);
-                std::cout << "FINISHed, whew, I am tired" << std::endl;
-                // Once in the FINISH state, deallocate ourselves (CallData).
-                delete this;
-            }
-        
-        }
-
-    private:
-        // The means of communication with the gRPC runtime for an asynchronous
-        // server.
-        AudioTranscription::AsyncService* service_;
-        // The producer-consumer queue where for asynchronous server notifications.
-        ServerCompletionQueue* cq_;
-        // Context for the rpc, allowing to tweak aspects of it such as the use
-        // of compression, authentication, as well as to send metadata back to the
-        // client.
-        ServerContext ctx_;
-
-        // The means to get back to the client.
-        ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest> bidiStream_;
-
-        // Let's implement a tiny state machine with the following states.
-        enum AudioTranscriptionStatus { CREATE, PROCESS, FINISH };
-        AudioTranscriptionStatus status_;  // The current serving state.
-        AudioSegmentRequest request_;
-        TranscriptResponse response_;            
-};
-
 /*
 AudioTranscriptionServiceImpl::AudioTranscriptionServiceImpl(audio_async *callback_audio) {
     m_audio_async = callback_audio;
@@ -155,26 +74,19 @@ audio_async::~audio_async() {
     // if (m_dev_id_in) {
     //     SDL_CloseAudioDevice(m_dev_id_in);
     // }
-    mup_server->Shutdown();
-    mup_cq->Shutdown();    
+    Shutdown();
 }
 
 bool audio_async::init(int server_port, int sample_rate) {
 
-    std::string server_address = "0.0.0.0:"+ std::to_string(server_port);
+    m_server_address = "0.0.0.0:"+ std::to_string(server_port);
 
     grpc::EnableDefaultHealthCheckService(true);
     grpc::reflection::InitProtoReflectionServerBuilderPlugin();
-    ServerBuilder builder;
-    // Listen on the given address without any authentication mechanism.
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+
     // Register "service" as the instance through which we'll communicate with
     // clients. In this case it corresponds to an *synchronous* service.
     //m_service = std::make_unique<AudioTranscriptionServiceImpl>(this);
-
-    builder.RegisterService(&m_service);
-    mup_cq = builder.AddCompletionQueue();
-    mup_server = builder.BuildAndStart();
 
     // SYNCH CALL
     // Finally assemble the server.
@@ -193,22 +105,40 @@ bool audio_async::init(int server_port, int sample_rate) {
         // clients in different threads to connect, simply 'request' from the
         // different threads. Each stream is independent but can use the same
         // completion queue/context objects.
+    StartAsyncService(m_server_address);
 
+
+    return true;
+}
+
+void audio_async::StartAsyncService(std::string server_address) {
+    mup_service = std::make_unique<AudioTranscription::AsyncService>();
+    ServerBuilder builder;
+    // Listen on the given address without any authentication mechanism.
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());    
+    builder.RegisterService(mup_service.get());
+    mup_cq = builder.AddCompletionQueue();
+    mup_server = builder.BuildAndStart();
     mup_stream.reset(
         new ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>(&m_context));
-    m_service.RequestTranscribeAudio(&m_context, mup_stream.get(), mup_cq.get(), mup_cq.get(),
+    mup_service->RequestTranscribeAudio(&m_context, mup_stream.get(), mup_cq.get(), mup_cq.get(),
         reinterpret_cast<void*>(Type::CONNECT));    
     m_context.AsyncNotifyWhenDone(reinterpret_cast<void*>(Type::DONE));
-    grpc_thread_.reset(new std::thread(
+    mup_grpc_thread.reset(new std::thread(
         (std::bind(&audio_async::GrpcThread, this))));   
     std::cout << "Server listening on " << server_address << std::endl;    
 
 
     m_running = true;
-
-
-    return true;
 }
+
+void audio_async::Shutdown() {
+        //mup_grpc_thread->join();
+    mup_server->Shutdown();
+    mup_cq->Shutdown();  
+    //delete m_service;
+}
+
 
 
 
@@ -219,7 +149,7 @@ bool audio_async::init(int server_port, int sample_rate) {
 void audio_async::GrpcThread() {
     std::cout << "GRPC thread running" << std::endl;    
 
-    while (true) {
+    while (m_running) {
         void* got_tag = nullptr;
         bool ok = false;
         if (!mup_cq->Next(&got_tag, &ok)) {
@@ -249,6 +179,9 @@ void audio_async::GrpcThread() {
             case Type::DONE:
                 std::cout << "Server disconnecting." << std::endl;
                 m_running = false;
+                mup_stream->Finish(::grpc::Status::CANCELLED, reinterpret_cast<void*>(Type::DONE));
+                //Shutdown();
+                //StartAsyncService(m_server_address);
                 break;
             case Type::FINISH:
                 std::cout << "Server quitting." << std::endl;
@@ -259,6 +192,7 @@ void audio_async::GrpcThread() {
             }
         }
     }
+    std::cout << "Stopping GRPC handler thread" << std::endl;
 }
 
 void audio_async::AsyncWaitForRequest() {
@@ -282,24 +216,6 @@ void audio_async::AsyncSendResponse() {
 //
 // END GIST
 //
-
-
-void audio_async::HandleRpcs() {
-
-    std::cout << "coming to handle some RPC's, my friend!" << std::endl;
-
-    new AsynchTranscriptionData(&m_service, mup_cq.get());
-    std::cout << "Got our first CQ item (startup)!" << std::endl;
-    void *tag;
-    bool ok;
-    while (true) {
-        GPR_ASSERT(mup_cq->Next(&tag, &ok));
-        std::cout << "Got another CQ item!" << std::endl;
-        GPR_ASSERT(ok);
-        static_cast<AsynchTranscriptionData*>(tag)->Proceed();
-    }
-
-}
 
 bool audio_async::resume() {
     // if (!m_dev_id_in) {
