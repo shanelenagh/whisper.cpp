@@ -26,43 +26,6 @@ using sigper::transcription::TranscriptResponse;
 
 enum class Type { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
 
-/*
-AudioTranscriptionServiceImpl::AudioTranscriptionServiceImpl(audio_async *callback_audio) {
-    m_audio_async = callback_audio;
-}
-*/
-
-// synchronous Transcription service implementation
-/*
-Status audio_async::TranscribeAudio(ServerContext* context,
-                ServerReaderWriter<TranscriptResponse, AudioSegmentRequest>* stream) 
-{
-    std::cout << "Got request\n";
-    AudioSegmentRequest audio;
-    while (stream->Read(&audio)) {
-        std::cout << "Read one with data: " << audio.audio_data() << std::endl;
-        ++seq_num;
-        std::cout << "Now writing to file " << seq_num << ".bin" << std::endl;
-        std::ofstream fout;
-        fout.open(std::to_string(seq_num)+".bin", std::ios::binary | std::ios::out);
-        fout.write(audio.audio_data().data(), audio.audio_data().length());
-        fout.close();
-
-        TranscriptResponse transcript;
-        transcript.set_seq_num(seq_num);
-        transcript.set_transcription("Got message\n");
-        stream->Write(transcript);
-        std::cout << "Wrote response" << std::endl;
-        //stream->WritesDone();
-        this->callback(audio.audio_data());
-    }    
-
-    std::cout << "Returning" << std::endl;
-
-    return Status::OK;
-}
-*/
-
 
 audio_async::audio_async(int len_ms) {
     m_len_ms = len_ms;
@@ -71,9 +34,6 @@ audio_async::audio_async(int len_ms) {
 }
 
 audio_async::~audio_async() {
-    // if (m_dev_id_in) {
-    //     SDL_CloseAudioDevice(m_dev_id_in);
-    // }
     Shutdown();
 }
 
@@ -84,27 +44,6 @@ bool audio_async::init(int server_port, int sample_rate) {
     grpc::EnableDefaultHealthCheckService(true);
     grpc::reflection::InitProtoReflectionServerBuilderPlugin();
 
-    // Register "service" as the instance through which we'll communicate with
-    // clients. In this case it corresponds to an *synchronous* service.
-    //m_service = std::make_unique<AudioTranscriptionServiceImpl>(this);
-
-    // SYNCH CALL
-    // Finally assemble the server.
-    //std::unique_ptr<Server> server(builder.BuildAndStart());
-    //std::cout << "Server listening on " << server_address << std::endl;
-
-    // ASYNCH SEMATICS
-    // std::cout << "Server listening on " << server_address << std::endl;
-    // HandleRpcs();
-
-    // ASYNC example - WORKS! :-)
-    //HandleRpcs();
-
-    // ASYNC Gist
-        // This initiates a single stream for a single client. To allow multiple
-        // clients in different threads to connect, simply 'request' from the
-        // different threads. Each stream is independent but can use the same
-        // completion queue/context objects.
     StartAsyncService(m_server_address);
 
 
@@ -138,10 +77,6 @@ void audio_async::Shutdown() {
     mup_cq->Shutdown();  
     //delete m_service;
 }
-
-
-
-
 
 //
 // BEGIN GIST
