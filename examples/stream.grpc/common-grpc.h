@@ -5,14 +5,25 @@
 #include <cstdint>
 #include <vector>
 #include <mutex>
+#include <string>
 
-//#include "transcription.grpc.pb.h"
+#include "transcription.grpc.pb.h"
+#include <grpcpp/grpcpp.h>
+
+using sigper::transcription::AudioTranscription;
+using sigper::transcription::AudioSegmentRequest;
+using sigper::transcription::TranscriptResponse;
+using grpc::Server;
+using grpc::ServerAsyncReaderWriter;
+using grpc::ServerBuilder;
+using grpc::ServerCompletionQueue;
+using grpc::ServerContext;
+using grpc::Status;
 
 //
 // gRPC server audio capture
 //
-
-class audio_async {
+class audio_async /*: public AudioTranscription::Service */{
 public:
     audio_async(int len_ms);
     ~audio_async();
@@ -24,18 +35,26 @@ public:
     bool resume();
     bool pause();
     bool clear();
+    bool is_running();
+
+    // SYNCHRONOUS GRPC service method
+    /*Status TranscribeAudio(ServerContext* context,
+                   ServerReaderWriter<TranscriptResponse, AudioSegmentRequest>* stream) override;    */
 
     // callback to be called by SDL
-    void callback(uint8_t * stream, int len);
+    void callback(std::string data);
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio);
 
 private:
     //SDL_AudioDeviceID m_dev_id_in = 0;
+    void HandleRpcs();
 
+    int seq_num = 0;
     int m_len_ms = 0;
     int m_sample_rate = 0;
+    //std::unique_ptr<AudioTranscriptionServiceImpl> m_service;
 
     std::atomic_bool m_running;
     std::mutex       m_mutex;
@@ -43,7 +62,18 @@ private:
     std::vector<float> m_audio;
     size_t             m_audio_pos = 0;
     size_t             m_audio_len = 0;
-};
 
-// Return false if need to quit
-bool sdl_poll_events();
+
+    // Async GRPC service support
+    std::unique_ptr<ServerCompletionQueue> mup_cq;
+    std::unique_ptr<Server> mup_server;  
+    std::unique_ptr<ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>> mup_stream;
+    ServerContext m_context;
+    // Transcription service classes
+    AudioTranscription::AsyncService m_service;
+    AudioSegmentRequest m_request;
+
+
+
+
+};

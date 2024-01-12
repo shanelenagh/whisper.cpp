@@ -153,7 +153,7 @@ int main(int argc, char ** argv) {
     // init audio
 
     audio_async audio(params.length_ms);
-    if (!audio.init(500001 /*TODO: get server port from CLI */, WHISPER_SAMPLE_RATE)) {
+    if (!audio.init(50051 /*TODO: get server port from CLI */, WHISPER_SAMPLE_RATE)) {
         fprintf(stderr, "%s: audio.init() failed!\n", __func__);
         return 1;
     }
@@ -244,7 +244,7 @@ int main(int argc, char ** argv) {
             wavWriter.write(pcmf32_new.data(), pcmf32_new.size());
         }
         // handle Ctrl + C
-        is_running = sdl_poll_events();
+        is_running = audio.is_running();
 
         if (!is_running) {
             break;

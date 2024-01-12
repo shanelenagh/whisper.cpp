@@ -1,14 +1,14 @@
 #include "common-grpc.h"
 
-#include <grpcpp/ext/proto_server_reflection_plugin.h>
-#include <grpcpp/grpcpp.h>
-#include <grpcpp/health_check_service_interface.h>
+
 #include <fstream>
 #include <string>
 #include <iostream>
+#include <thread>
 
-
-
+#include <grpcpp/ext/proto_server_reflection_plugin.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/health_check_service_interface.h>
 #include "transcription.grpc.pb.h"
 
 
@@ -23,41 +23,127 @@ using sigper::transcription::AudioTranscription;
 using sigper::transcription::AudioSegmentRequest;
 using sigper::transcription::TranscriptResponse;
 
-/*
-// Transcription service implementation
-class AudioTranscriptionServiceImpl final : public AudioTranscription::Service {
 
-  Status TranscribeAudio(ServerContext* context,
-                   ServerReaderWriter<TranscriptResponse, AudioSegmentRequest>* stream) override 
-  {
+enum class Type { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
+
+class AsynchTranscriptionData {
+    public:
+
+        // Take in the "service" instance (in this case representing an asynchronous
+        // server) and the completion queue "cq" used for asynchronous communication
+        // with the gRPC runtime.
+        AsynchTranscriptionData(AudioTranscription::AsyncService* service, ServerCompletionQueue* cq)
+            : service_(service), cq_(cq), bidiStream_(&ctx_), status_(CREATE) {
+        // Invoke the serving logic right away.
+        Proceed();
+        }
+
+        void Proceed() {
+            std::cout << "Proceeding, my friend!" << std::endl;
+
+            if (status_ == CREATE) {
+                // Make this instance progress to the PROCESS state.
+                status_ = PROCESS;
+                std::cout << "CREATE, so making our request to start processing" << std::endl;
+                // As part of the initial CREATE state, we *request* that the system
+                // start processing SayHello requests. In this request, "this" acts are
+                // the tag uniquely identifying the request (so that different CallData
+                // instances can serve different requests concurrently), in this case
+                // the memory address of this CallData instance.
+                service_->RequestTranscribeAudio(&ctx_, &bidiStream_, cq_, cq_,
+                                        this);
+                std::cout << "Made our request to start processing" << std::endl;
+            } else if (status_ == PROCESS) {
+                std::cout << "Oh boy, we are processing now!" << std::endl;
+                /*
+                // Spawn a new CallData instance to serve new clients while we process
+                // the one for this CallData. The instance will deallocate itself as
+                // part of its FINISH state.
+                new CallData(service_, cq_);
+                NM: SHANE: NOOOOO!!! We don't want this to handle multiple requests, so ignore them
+                */
+                new AsynchTranscriptionData(service_, cq_);
+
+                bidiStream_.Read(&request_, this);
+
+                std::cout << "Here is what I got for audio: " << request_.audio_data() << " of size " << request_.audio_data().size() << std::endl;
+
+                // The actual processing.
+                response_.set_transcription("hey from the async-server-land!: "+request_.audio_data());
+
+                // And we are done! Let the gRPC runtime know we've finished, using the
+                // memory address of this instance as the uniquely identifying tag for
+                // the event.
+                status_ = FINISH;
+                bidiStream_.Write(response_, this);
+                
+            } else {
+                GPR_ASSERT(status_ == FINISH);
+                std::cout << "FINISHed, whew, I am tired" << std::endl;
+                // Once in the FINISH state, deallocate ourselves (CallData).
+                delete this;
+            }
+        
+        }
+
+    private:
+        // The means of communication with the gRPC runtime for an asynchronous
+        // server.
+        AudioTranscription::AsyncService* service_;
+        // The producer-consumer queue where for asynchronous server notifications.
+        ServerCompletionQueue* cq_;
+        // Context for the rpc, allowing to tweak aspects of it such as the use
+        // of compression, authentication, as well as to send metadata back to the
+        // client.
+        ServerContext ctx_;
+
+        // The means to get back to the client.
+        ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest> bidiStream_;
+
+        // Let's implement a tiny state machine with the following states.
+        enum AudioTranscriptionStatus { CREATE, PROCESS, FINISH };
+        AudioTranscriptionStatus status_;  // The current serving state.
+        AudioSegmentRequest request_;
+        TranscriptResponse response_;            
+};
+
+/*
+AudioTranscriptionServiceImpl::AudioTranscriptionServiceImpl(audio_async *callback_audio) {
+    m_audio_async = callback_audio;
+}
+*/
+
+// synchronous Transcription service implementation
+/*
+Status audio_async::TranscribeAudio(ServerContext* context,
+                ServerReaderWriter<TranscriptResponse, AudioSegmentRequest>* stream) 
+{
     std::cout << "Got request\n";
     AudioSegmentRequest audio;
     while (stream->Read(&audio)) {
-      std::cout << "Read one with data: " << audio.audio_data() << "\n";
-      ++seq_num;
-      std::cout << "Now writing to file " << seq_num << ".bin\n";
-      std::ofstream fout;
-      fout.open(std::to_string(seq_num)+".bin", std::ios::binary | std::ios::out);
-      fout.write(audio.audio_data().data(), audio.audio_data().length());
-      fout.close();
+        std::cout << "Read one with data: " << audio.audio_data() << std::endl;
+        ++seq_num;
+        std::cout << "Now writing to file " << seq_num << ".bin" << std::endl;
+        std::ofstream fout;
+        fout.open(std::to_string(seq_num)+".bin", std::ios::binary | std::ios::out);
+        fout.write(audio.audio_data().data(), audio.audio_data().length());
+        fout.close();
 
-      TranscriptResponse transcript;
-      transcript.set_seq_num(seq_num);
-      transcript.set_transcription("Got message");
-      stream->Write(transcript);
-      std::cout << "Wrote response";
-      //stream->WritesDone();
+        TranscriptResponse transcript;
+        transcript.set_seq_num(seq_num);
+        transcript.set_transcription("Got message\n");
+        stream->Write(transcript);
+        std::cout << "Wrote response" << std::endl;
+        //stream->WritesDone();
+        this->callback(audio.audio_data());
     }    
 
-    std::cout << "Returning";
+    std::cout << "Returning" << std::endl;
 
     return Status::OK;
-  }
-
-  private:
-    int seq_num = 0;
-};
+}
 */
+
 
 audio_async::audio_async(int len_ms) {
     m_len_ms = len_ms;
@@ -69,70 +155,69 @@ audio_async::~audio_async() {
     // if (m_dev_id_in) {
     //     SDL_CloseAudioDevice(m_dev_id_in);
     // }
+    mup_server->Shutdown();
+    mup_cq->Shutdown();    
 }
 
 bool audio_async::init(int server_port, int sample_rate) {
-    // SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
-    // if (SDL_Init(SDL_INIT_AUDIO) < 0) {
-    //     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't initialize SDL: %s\n", SDL_GetError());
-    //     return false;
-    // }
+    std::string server_address = "0.0.0.0:"+ std::to_string(server_port);
 
-    // SDL_SetHintWithPriority(SDL_HINT_AUDIO_RESAMPLING_MODE, "medium", SDL_HINT_OVERRIDE);
+    grpc::EnableDefaultHealthCheckService(true);
+    grpc::reflection::InitProtoReflectionServerBuilderPlugin();
+    ServerBuilder builder;
+    // Listen on the given address without any authentication mechanism.
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    // Register "service" as the instance through which we'll communicate with
+    // clients. In this case it corresponds to an *synchronous* service.
+    //m_service = std::make_unique<AudioTranscriptionServiceImpl>(this);
+    
+    // SYNCH CALL
+    //builder.RegisterService(&m_service);
+    // Finally assemble the server.
+    //std::unique_ptr<Server> server(builder.BuildAndStart());
+    //std::cout << "Server listening on " << server_address << std::endl;
 
-    // {
-    //     int nDevices = SDL_GetNumAudioDevices(SDL_TRUE);
-    //     fprintf(stderr, "%s: found %d capture devices:\n", __func__, nDevices);
-    //     for (int i = 0; i < nDevices; i++) {
-    //         fprintf(stderr, "%s:    - Capture device #%d: '%s'\n", __func__, i, SDL_GetAudioDeviceName(i, SDL_TRUE));
-    //     }
-    // }
+    // ASYNCH SEMATICS
+    // m_service = std::make_unique<AudioTranscription::AsyncService>();
+    // builder.RegisterService(m_service.get());
+    // m_cq = builder.AddCompletionQueue();
+    // m_server = builder.BuildAndStart();
+    // std::cout << "Server listening on " << server_address << std::endl;
+    // HandleRpcs();
 
-    // SDL_AudioSpec capture_spec_requested;
-    // SDL_AudioSpec capture_spec_obtained;
+    // ASYNC gist
+    builder.RegisterService(&m_service);
+    mup_cq = builder.AddCompletionQueue();
+    mup_server = builder.BuildAndStart();
 
-    // SDL_zero(capture_spec_requested);
-    // SDL_zero(capture_spec_obtained);
+    HandleRpcs();
+    // mup_stream.reset(
+    //     new ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>(&m_context));
+    // m_service.Reque
 
-    // capture_spec_requested.freq     = sample_rate;
-    // capture_spec_requested.format   = AUDIO_F32;
-    // capture_spec_requested.channels = 1;
-    // capture_spec_requested.samples  = 1024;
-    // capture_spec_requested.callback = [](void * userdata, uint8_t * stream, int len) {
-    //     audio_async * audio = (audio_async *) userdata;
-    //     audio->callback(stream, len);
-    // };
-    // capture_spec_requested.userdata = this;
 
-    // if (capture_id >= 0) {
-    //     fprintf(stderr, "%s: attempt to open capture device %d : '%s' ...\n", __func__, capture_id, SDL_GetAudioDeviceName(capture_id, SDL_TRUE));
-    //     m_dev_id_in = SDL_OpenAudioDevice(SDL_GetAudioDeviceName(capture_id, SDL_TRUE), SDL_TRUE, &capture_spec_requested, &capture_spec_obtained, 0);
-    // } else {
-    //     fprintf(stderr, "%s: attempt to open default capture device ...\n", __func__);
-    //     m_dev_id_in = SDL_OpenAudioDevice(nullptr, SDL_TRUE, &capture_spec_requested, &capture_spec_obtained, 0);
-    // }
+    m_running = true;
 
-    // if (!m_dev_id_in) {
-    //     fprintf(stderr, "%s: couldn't open an audio device for capture: %s!\n", __func__, SDL_GetError());
-    //     m_dev_id_in = 0;
-
-    //     return false;
-    // } else {
-    //     fprintf(stderr, "%s: obtained spec for input device (SDL Id = %d):\n", __func__, m_dev_id_in);
-    //     fprintf(stderr, "%s:     - sample rate:       %d\n",                   __func__, capture_spec_obtained.freq);
-    //     fprintf(stderr, "%s:     - format:            %d (required: %d)\n",    __func__, capture_spec_obtained.format,
-    //             capture_spec_requested.format);
-    //     fprintf(stderr, "%s:     - channels:          %d (required: %d)\n",    __func__, capture_spec_obtained.channels,
-    //             capture_spec_requested.channels);
-    //     fprintf(stderr, "%s:     - samples per frame: %d\n",                   __func__, capture_spec_obtained.samples);
-    // }
-
-    // m_sample_rate = capture_spec_obtained.freq;
-
-    // m_audio.resize((m_sample_rate*m_len_ms)/1000);
 
     return true;
+}
+
+void audio_async::HandleRpcs() {
+
+    std::cout << "coming to handle some RPC's, my friend!" << std::endl;
+
+    new AsynchTranscriptionData(&m_service, mup_cq.get());
+    std::cout << "Got our first CQ item (startup)!" << std::endl;
+    void *tag;
+    bool ok;
+    while (true) {
+        GPR_ASSERT(mup_cq->Next(&tag, &ok));
+        std::cout << "Got another CQ item!" << std::endl;
+        GPR_ASSERT(ok);
+        static_cast<AsynchTranscriptionData*>(tag)->Proceed();
+    }
+
 }
 
 bool audio_async::resume() {
@@ -193,7 +278,9 @@ bool audio_async::clear() {
 }
 
 // callback to be called by SDL
-void audio_async::callback(uint8_t * stream, int len) {
+void audio_async::callback(std::string data) {
+
+    std::cout << "Called back with: " << data << std::endl;
     // if (!m_running) {
     //     return;
     // }
@@ -229,6 +316,9 @@ void audio_async::callback(uint8_t * stream, int len) {
 }
 
 void audio_async::get(int ms, std::vector<float> & result) {
+
+    std::this_thread::sleep_for (std::chrono::seconds(3));
+
     // if (!m_dev_id_in) {
     //     fprintf(stderr, "%s: no audio device to get audio from!\n", __func__);
     //     return;
@@ -271,20 +361,9 @@ void audio_async::get(int ms, std::vector<float> & result) {
     // }
 }
 
-bool sdl_poll_events() {
-    // SDL_Event event;
-    // while (SDL_PollEvent(&event)) {
-    //     switch (event.type) {
-    //         case SDL_QUIT:
-    //             {
-    //                 return false;
-    //             } break;
-    //         default:
-    //             break;
-    //     }
-    // }
-
-    return true;
+bool audio_async::is_running() {
+    return m_running;
 }
+
 
 
