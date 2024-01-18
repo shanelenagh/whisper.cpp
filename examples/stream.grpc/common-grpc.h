@@ -44,7 +44,8 @@ public:
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio);
-    void SendTranscript(std::string transcript, int seq_num, std::time_t start_time, std::time_t end_time);
+    void SendTranscription(std::string transcript, int seq_num,
+        std::time_t start_time = std::time(0), std::time_t end_time= std::time(0)) ;
 
 private:
     enum class TagType { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
@@ -62,7 +63,8 @@ private:
     int m_sample_rate = 0;
     //std::unique_ptr<AudioTranscriptionServiceImpl> m_service;
 
-    std::atomic_bool m_running;
+    std::atomic_bool m_running = false;
+    std::atomic_bool m_connected = false;
     std::mutex       m_mutex;
 
     std::vector<float> m_audio;

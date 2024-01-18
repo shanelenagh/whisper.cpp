@@ -8,7 +8,6 @@
 #include <chrono>
 #include <stdio.h>
 
-#include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
 #include "transcription.grpc.pb.h"
@@ -58,7 +57,6 @@ static void error_log(std::string msg)
 
 audio_async::audio_async(int len_ms) {
     m_len_ms = len_ms;
-
     m_running = false;
 }
 
@@ -71,7 +69,6 @@ bool audio_async::init(int server_port, int sample_rate) {
     m_server_address = "0.0.0.0:"+ std::to_string(server_port);
 
     grpc::EnableDefaultHealthCheckService(true);
-    grpc::reflection::InitProtoReflectionServerBuilderPlugin();
 
     StartAsyncService(m_server_address);
 
@@ -90,17 +87,12 @@ void audio_async::StartAsyncService(std::string server_address) {
 
     mup_grpc_thread.reset(new std::thread(
         (std::bind(&audio_async::GrpcThread, this))));   
-    std::cout << "Server listening on " << server_address << std::endl;    
-
-
-    m_running = true;
+    log("************ Server listening on " + server_address + " ************");    
 }
 
 void audio_async::Shutdown() {
-        //mup_grpc_thread->join();
     mup_server->Shutdown();
     mup_cq->Shutdown();  
-    //delete m_service;
 }
 
 //
@@ -118,6 +110,7 @@ void audio_async::Shutdown() {
         reinterpret_cast<void*>(TagType::CONNECT));
     // This is important as the server should know when the client is done.
     context->AsyncNotifyWhenDone(reinterpret_cast<void*>(TagType::DONE));    
+    m_running = true;
   }
 
 
@@ -140,7 +133,7 @@ void audio_async::GrpcThread() {
                 WaitForRequest();
                 break;
             case TagType::CONNECT:
-                m_running = true;
+                m_connected = true;
                 log(">>  Client connected.");
                 WaitForRequest();
                 break;
@@ -149,27 +142,27 @@ void audio_async::GrpcThread() {
                 break;
             case TagType::DONE:
                 log("  Server disconnecting.");
-                m_running = false;
+                m_connected = false;
                 break;
             case TagType::FINISH:
                 error_log(">>>>  Server quitting.");
+                m_running = false;
                 break;
             default:
                 error_log("Unexpected tag: " + std::to_string(reinterpret_cast<size_t>(got_tag)));
                 assert(false);
             }
         } else {
-        m_running = false;
-        error_log(">>>>>> CQ STATUS NOT OK (maybe disconnected)! -- Restarting listener for new connection");
-        StartNewRpcConnectionListner();
-        //break;
+            m_running = false;
+            error_log(">>>>>> CQ STATUS NOT OK (maybe disconnected)! -- Restarting listener for new connection");
+            StartNewRpcConnectionListner();
         }
     }
     log("----------> LEAVING GRPC THREAD");
 }
 
 void audio_async::WaitForRequest() {
-    if (is_running()) {
+    if (m_connected) {
         // In the case of the server, we wait for a READ first and then write a
         // response. A server cannot initiate a connection so the server has to
         // wait for the client to send a message in order for it to respond back.
@@ -181,8 +174,20 @@ void audio_async::IngestAudioData() {
     log("Got data to ingest/process: "+m_request.audio_data());
 }
 
-void audio_async::SendTranscript(std::string transcript, int seq_num, std::time_t start_time, std::time_t end_time) {
-    //TODO: do stuff
+void audio_async::SendTranscription(std::string transcript, int seq_num,
+    std::time_t start_time, std::time_t end_time) 
+{
+    if (m_connected) {
+      log(">> EXTERNAL writing:  "+transcript);
+      TranscriptResponse response;
+      response.set_transcription(transcript);
+      response.set_seq_num(seq_num);
+      //response.set_start_time(start_time);
+      //response.set_end_time(end_time);
+      mup_stream->Write(response, reinterpret_cast<void*>(TagType::WRITE));
+    } else {
+      error_log(">>>>>> CANNOT SEND TRANSCRIPTION -- NOT RUNNING");
+    }
 }
 //
 // END GRPC PROCESSING
@@ -332,6 +337,3 @@ void audio_async::get(int ms, std::vector<float> & result) {
 bool audio_async::is_running() {
     return m_running;
 }
-
-
-
