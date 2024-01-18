@@ -5,6 +5,8 @@
 #include <string>
 #include <iostream>
 #include <thread>
+#include <chrono>
+#include <stdio.h>
 
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
@@ -22,9 +24,36 @@ using grpc::Status;
 using sigper::transcription::AudioTranscription;
 using sigper::transcription::AudioSegmentRequest;
 using sigper::transcription::TranscriptResponse;
+  
 
+static void log(std::string msg, bool error = false) 
+{
+    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count() % 1000;
+    auto t = std::time(0);
+    auto now = std::localtime(&t);
+    char timebuf[sizeof "9999-12-31 29:59:59.9999"];
+    sprintf(
+        timebuf,
+        "%04d-%02d-%02d %02d:%02d:%02d.%03ld",
+        now->tm_year + 1900,
+        now->tm_mon + 1,
+        now->tm_mday,
+        now->tm_hour,
+        now->tm_min,
+        now->tm_sec,
+        millis);
+    if (error) {
+        std::cerr << timebuf << ": " << msg << std::endl;
+    } else {
+        std::cout << timebuf << ": " << msg << std::endl;
+    }
+}  
 
-enum class Type { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
+static void error_log(std::string msg) 
+{
+    log(msg, true);
+}
 
 
 audio_async::audio_async(int len_ms) {
@@ -46,23 +75,19 @@ bool audio_async::init(int server_port, int sample_rate) {
 
     StartAsyncService(m_server_address);
 
-
     return true;
 }
 
 void audio_async::StartAsyncService(std::string server_address) {
-    mup_service = std::make_unique<AudioTranscription::AsyncService>();
     ServerBuilder builder;
     // Listen on the given address without any authentication mechanism.
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());    
-    builder.RegisterService(mup_service.get());
+    builder.RegisterService(&m_service);
     mup_cq = builder.AddCompletionQueue();
     mup_server = builder.BuildAndStart();
-    mup_stream.reset(
-        new ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>(&m_context));
-    mup_service->RequestTranscribeAudio(&m_context, mup_stream.get(), mup_cq.get(), mup_cq.get(),
-        reinterpret_cast<void*>(Type::CONNECT));    
-    m_context.AsyncNotifyWhenDone(reinterpret_cast<void*>(Type::DONE));
+
+    StartNewRpcConnectionListner();
+
     mup_grpc_thread.reset(new std::thread(
         (std::bind(&audio_async::GrpcThread, this))));   
     std::cout << "Server listening on " << server_address << std::endl;    
@@ -79,77 +104,88 @@ void audio_async::Shutdown() {
 }
 
 //
-// BEGIN GIST
+// BEGIN GPRC PROCESSING
 //
-void audio_async::GrpcThread() {
-    std::cout << "GRPC thread running" << std::endl;    
+  void audio_async::StartNewRpcConnectionListner() {
+    std::unique_ptr<ServerContext> context = std::make_unique<ServerContext>();
+    // This initiates a single stream for a single client. To allow multiple
+    // clients in different threads to connect, simply 'request' from the
+    // different threads. Each stream is independent but can use the same
+    // completion queue/context objects.
+    mup_stream.reset(
+        new ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>(context.get()));
+    m_service.RequestTranscribeAudio(context.get(), mup_stream.get(), mup_cq.get(), mup_cq.get(),
+        reinterpret_cast<void*>(TagType::CONNECT));
+    // This is important as the server should know when the client is done.
+    context->AsyncNotifyWhenDone(reinterpret_cast<void*>(TagType::DONE));    
+  }
 
-    while (m_running) {
+
+void audio_async::GrpcThread() {
+    while (true) {
         void* got_tag = nullptr;
         bool ok = false;
         if (!mup_cq->Next(&got_tag, &ok)) {
-            std::cerr << "Server stream closed. Quitting" << std::endl;
+            error_log("Server stream closed. Quitting");
             break;
         }
 
-        //assert(ok);
-
         if (ok) {
-            std::cout << std::endl
-                << "**** Processing completion queue tag " << got_tag
-                << std::endl;
-            switch (static_cast<Type>(reinterpret_cast<size_t>(got_tag))) {
-            case Type::READ:
-                std::cout << "Read a new message." << std::endl;
-                AsyncSendResponse();
+            //log("**** Processing completion queue tag " + std::to_string(reinterpret_cast<size_t>(got_tag)));
+            // Inline event handler and quasi-state machine (though this handles asynch reads/writes, so a strict SM is not applicable)
+            switch (static_cast<TagType>(reinterpret_cast<size_t>(got_tag))) {
+            case TagType::READ:
+                // Read done, great -- just wait for next activity (read or new external write) now that it is out
+                IngestAudioData();
+                WaitForRequest();
                 break;
-            case Type::WRITE:
-                std::cout << "Sending message (async)." << std::endl;
-                AsyncWaitForRequest();
+            case TagType::CONNECT:
+                m_running = true;
+                log(">>  Client connected.");
+                WaitForRequest();
                 break;
-            case Type::CONNECT:
-                std::cout << "Client connected." << std::endl;
-                AsyncWaitForRequest();
+            case TagType::WRITE:
+                // Async write done, great -- just wait for next activity (read or new external write) now that it is out
                 break;
-            case Type::DONE:
-                std::cout << "Server disconnecting." << std::endl;
+            case TagType::DONE:
+                log("  Server disconnecting.");
                 m_running = false;
-                mup_stream->Finish(::grpc::Status::CANCELLED, reinterpret_cast<void*>(Type::DONE));
-                //Shutdown();
-                //StartAsyncService(m_server_address);
                 break;
-            case Type::FINISH:
-                std::cout << "Server quitting." << std::endl;
+            case TagType::FINISH:
+                error_log(">>>>  Server quitting.");
                 break;
             default:
-                std::cerr << "Unexpected tag " << got_tag << std::endl;
+                error_log("Unexpected tag: " + std::to_string(reinterpret_cast<size_t>(got_tag)));
                 assert(false);
             }
+        } else {
+        m_running = false;
+        error_log(">>>>>> CQ STATUS NOT OK (maybe disconnected)! -- Restarting listener for new connection");
+        StartNewRpcConnectionListner();
+        //break;
         }
     }
-    std::cout << "Stopping GRPC handler thread" << std::endl;
+    log("----------> LEAVING GRPC THREAD");
 }
 
-void audio_async::AsyncWaitForRequest() {
+void audio_async::WaitForRequest() {
     if (is_running()) {
         // In the case of the server, we wait for a READ first and then write a
         // response. A server cannot initiate a connection so the server has to
         // wait for the client to send a message in order for it to respond back.
-        mup_stream->Read(&m_request, reinterpret_cast<void*>(Type::READ));
-        std::cout << "Read request with data: " << m_request.audio_data();
+        mup_stream->Read(&m_request, reinterpret_cast<void*>(TagType::READ));
     }
 }
 
-void audio_async::AsyncSendResponse() {
-    std::cout << " ** Handling request: " << m_request.audio_data() << std::endl;
-    TranscriptResponse response;
-    std::string resp = "I hear you: " + m_request.audio_data();
-    std::cout << " ** Sending response: " << resp << std::endl;
-    response.set_transcription(resp);
-    mup_stream->Write(response, reinterpret_cast<void*>(Type::WRITE));
+void audio_async::IngestAudioData() {
+    log("Got data to ingest/process: "+m_request.audio_data());
+}
+
+void audio_async::SendTranscript(std::string transcript, int seq_num, std::time_t start_time, std::time_t end_time) {
+    //TODO: do stuff
 }
 //
-// END GIST
+// END GRPC PROCESSING
 //
 
 bool audio_async::resume() {

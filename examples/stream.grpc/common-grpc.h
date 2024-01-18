@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <ctime>
 #include <vector>
 #include <mutex>
 #include <string>
@@ -24,7 +25,7 @@ using grpc::Status;
 //
 // gRPC server audio capture
 //
-class audio_async /*: public AudioTranscription::Service */{
+class audio_async {
 public:
     audio_async(int len_ms);
     ~audio_async();
@@ -38,24 +39,21 @@ public:
     bool clear();
     bool is_running();
 
-    // SYNCHRONOUS GRPC service method
-    /*Status TranscribeAudio(ServerContext* context,
-                   ServerReaderWriter<TranscriptResponse, AudioSegmentRequest>* stream) override;    */
-
     // callback to be called by SDL
     void callback(std::string data);
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio);
+    void SendTranscript(std::string transcript, int seq_num, std::time_t start_time, std::time_t end_time);
 
 private:
-    //SDL_AudioDeviceID m_dev_id_in = 0;
-    void HandleRpcs();
-
-    //gist stuff
+    enum class TagType { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
+    // GRPC service methods
+    void StartNewRpcConnectionListner();
     void GrpcThread();
-    void AsyncWaitForRequest();
-    void AsyncSendResponse();
+    void WaitForRequest();
+    void IngestAudioData();
+    
     void StartAsyncService(std::string server_address);
     void Shutdown();
 
@@ -76,12 +74,8 @@ private:
     std::unique_ptr<ServerCompletionQueue> mup_cq;
     std::unique_ptr<Server> mup_server;  
     std::unique_ptr<ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>> mup_stream;
-    ServerContext m_context;
-    // Transcription service classes
-    std::unique_ptr<AudioTranscription::AsyncService> mup_service;
+    AudioTranscription::AsyncService m_service;
     AudioSegmentRequest m_request;
-
-    //gist stuff
     std::unique_ptr<std::thread> mup_grpc_thread;
     std::string m_server_address;
 };
