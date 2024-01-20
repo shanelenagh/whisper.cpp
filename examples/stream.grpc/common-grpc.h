@@ -39,9 +39,6 @@ public:
     bool clear();
     bool is_running();
 
-    // callback to be called by SDL
-    void callback(std::string data);
-
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio);
     void SendTranscription(std::string transcript, int seq_num,
@@ -54,9 +51,12 @@ private:
     void GrpcThread();
     void WaitForRequest();
     void IngestAudioData();
-    
     void StartAsyncService(std::string server_address);
+
     void Shutdown();
+
+    // callback to be called by gRPC
+    void callback(uint8_t * stream, int len);    
 
     int seq_num = 0;
     int m_len_ms = 0;

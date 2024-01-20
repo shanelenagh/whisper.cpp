@@ -171,7 +171,9 @@ void audio_async::WaitForRequest() {
 }
 
 void audio_async::IngestAudioData() {
-    log("Got data to ingest/process: "+m_request.audio_data());
+    //log("Got data to ingest/process: "+m_request.audio_data());
+    this->callback((uint8_t*)m_request.audio_data().c_str(), m_request.audio_data().size());
+    log("==> Now audio is of size: "+std::to_string(m_audio_len));
 }
 
 void audio_async::SendTranscription(std::string transcript, int seq_num,
@@ -251,41 +253,41 @@ bool audio_async::clear() {
 }
 
 // callback to be called by SDL
-void audio_async::callback(std::string data) {
+void audio_async::callback(uint8_t * stream, int len) {
 
-    std::cout << "Called back with: " << data << std::endl;
-    // if (!m_running) {
-    //     return;
-    // }
+    //std::cout << "Called back with: " << data << std::endl;
+    if (!m_running) {
+        return;
+    }
 
-    // size_t n_samples = len / sizeof(float);
+    size_t n_samples = len / sizeof(float);
 
-    // if (n_samples > m_audio.size()) {
-    //     n_samples = m_audio.size();
+    if (n_samples > m_audio.size()) {
+        n_samples = m_audio.size();
 
-    //     stream += (len - (n_samples * sizeof(float)));
-    // }
+        stream += (len - (n_samples * sizeof(float)));
+    }
 
-    // //fprintf(stderr, "%s: %zu samples, pos %zu, len %zu\n", __func__, n_samples, m_audio_pos, m_audio_len);
+    //fprintf(stderr, "%s: %zu samples, pos %zu, len %zu\n", __func__, n_samples, m_audio_pos, m_audio_len);
 
-    // {
-    //     std::lock_guard<std::mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    //     if (m_audio_pos + n_samples > m_audio.size()) {
-    //         const size_t n0 = m_audio.size() - m_audio_pos;
+        if (m_audio_pos + n_samples > m_audio.size()) {
+            const size_t n0 = m_audio.size() - m_audio_pos;
 
-    //         memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(float));
-    //         memcpy(&m_audio[0], stream + n0 * sizeof(float), (n_samples - n0) * sizeof(float));
+            memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(float));
+            memcpy(&m_audio[0], stream + n0 * sizeof(float), (n_samples - n0) * sizeof(float));
 
-    //         m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-    //         m_audio_len = m_audio.size();
-    //     } else {
-    //         memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(float));
+            m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
+            m_audio_len = m_audio.size();
+        } else {
+            memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(float));
 
-    //         m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-    //         m_audio_len = std::min(m_audio_len + n_samples, m_audio.size());
-    //     }
-    // }
+            m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
+            m_audio_len = std::min(m_audio_len + n_samples, m_audio.size());
+        }
+    }
 }
 
 void audio_async::get(int ms, std::vector<float> & result) {
