@@ -260,15 +260,16 @@ int main(int argc, char ** argv) {
         if (!use_vad) {
             while (true) {
                 audio.get(params.step_ms, pcmf32_new);
-                fprintf(stderr, "\nGot audio of size %d\n", pcmf32_new.size());
+                //fprintf(stderr, "\nGot audio of size %d\n", pcmf32_new.size());
                 if ((int) pcmf32_new.size() > 2*n_samples_step) {
                     fprintf(stderr, "\n\n%s: WARNING: cannot process audio fast enough, dropping audio ...\n\n", __func__);
-                    audio.SendTranscription("Fake", 1);
+                    //audio.SendTranscription("Fake", 1);
                     audio.clear();
                     continue;
                 }
 
                 if ((int) pcmf32_new.size() >= n_samples_step) {
+                    //std::cout << "CLEARING!!!!\n";
                     audio.clear();
                     break;
                 }
@@ -314,6 +315,8 @@ int main(int argc, char ** argv) {
 
             t_last = t_now;
         }
+
+        int trans_seq_num = 1;
 
         // run the inference
         {
@@ -394,6 +397,8 @@ int main(int argc, char ** argv) {
                             fout << output;
                         }
                     }
+                    // Send output to service
+                    audio.SendTranscription(std::string(text), trans_seq_num++);
                 }
 
                 if (params.fname_out.length() > 0) {
@@ -428,6 +433,7 @@ int main(int argc, char ** argv) {
                 }
             }
             fflush(stdout);
+
         }
     }
 

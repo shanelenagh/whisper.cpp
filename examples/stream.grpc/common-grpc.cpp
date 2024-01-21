@@ -174,40 +174,22 @@ void audio_async::WaitForRequest() {
     }
 }
 
-static inline std::vector<float> convert_s16le_string_to_floats(std::string strdata) {
-    std::vector<int16_t> intdata;
-    std::vector<float> floats;
-    //log("About to call string size");
-    intdata.resize(strdata.size() / sizeof(int16_t));
-    floats.resize(intdata.size());
-    //log("Called string wsize");
+
+static inline std::vector<float> convert_s16le_string_data_to_floats(std::string strdata) {
+    std::vector<int16_t> intdata(strdata.size() / sizeof(int16_t));
+    std::vector<float> floats(intdata.size());
     memcpy(intdata.data(), strdata.data(), strdata.size());     // assumes little endian system
-    //log("memcopy done");
-    float f;
     int i = 0;
     for (auto& d : intdata) {
-        //log (" "+std::to_string(d));
-        f = (float) d / 32768.0f;
-        //log(" ==> " + std::to_string(f));
-        floats.at(i++) = f;
-        //std::cout << " " << d;
+        floats.at(i++) = (float) d / 32768.0f;
     }
     return floats;
 } 
 
 void audio_async::IngestAudioData() {
-    //log("Got data to ingest/process: "+m_request.audio_data());
     //log("Got data");
-    //log("Ingesting audio data: "+m_request.audio_data());
-    std::vector<float> sampleData = convert_s16le_string_to_floats(m_request.audio_data());
-    //log("got sample data of size: "+std::to_string(sampleData.size()));
-    //log("peeding at first element: "+std::to_string(sampleData[0]));
-    //log("peeding at 2 element: "+std::to_string(sampleData[1]));
-    //for (int i = 0; i < sampleData.size(); i++) {
-    //    std::cout << "dumping float " << std::endl;
-    //    std::cout << " " << sampleData.at(i) << " " << std::endl;
-    //}
-    log("about to call callback");
+    std::vector<float> sampleData = convert_s16le_string_data_to_floats(m_request.audio_data());
+    //log("about to call callback");
     this->callback((uint8_t*) sampleData.data(), sampleData.size()*sizeof(float));
     log("==> Now audio is of size: "+std::to_string(m_audio_len));
 }
@@ -216,7 +198,7 @@ void audio_async::SendTranscription(std::string transcript, int seq_num,
     std::time_t start_time, std::time_t end_time) 
 {
     if (m_connected) {
-      log(">> EXTERNAL writing:  "+transcript);
+      //log(">> EXTERNAL writing:  "+transcript);
       TranscriptResponse response;
       response.set_transcription(transcript);
       response.set_seq_num(seq_num);
@@ -268,22 +250,18 @@ bool audio_async::pause() {
 }
 
 bool audio_async::clear() {
-    // if (!m_dev_id_in) {
-    //     fprintf(stderr, "%s: no audio device to clear!\n", __func__);
-    //     return false;
-    // }
 
-    // if (!m_running) {
-    //     fprintf(stderr, "%s: not running!\n", __func__);
-    //     return false;
-    // }
+    if (!m_running) {
+        fprintf(stderr, "%s: not running!\n", __func__);
+        return false;
+    }
 
-    // {
-    //     std::lock_guard<std::mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    //     m_audio_pos = 0;
-    //     m_audio_len = 0;
-    // }
+        m_audio_pos = 0;
+        m_audio_len = 0;
+    }
 
     return true;
 }
