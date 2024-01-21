@@ -23,36 +23,6 @@ using grpc::Status;
 using sigper::transcription::AudioTranscription;
 using sigper::transcription::AudioSegmentRequest;
 using sigper::transcription::TranscriptResponse;
-  
-
-static void log(std::string msg, bool error = false) 
-{
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count() % 1000;
-    auto t = std::time(0);
-    auto now = std::localtime(&t);
-    char timebuf[sizeof "9999-12-31 29:59:59.9999"];
-    sprintf(
-        timebuf,
-        "%04d-%02d-%02d %02d:%02d:%02d.%03ld",
-        now->tm_year + 1900,
-        now->tm_mon + 1,
-        now->tm_mday,
-        now->tm_hour,
-        now->tm_min,
-        now->tm_sec,
-        millis);
-    if (error) {
-        std::cerr << timebuf << ": " << msg << std::endl;
-    } else {
-        std::cout << timebuf << ": " << msg << std::endl;
-    }
-}  
-
-static void error_log(std::string msg) 
-{
-    log(msg, true);
-}
 
 
 audio_async::audio_async(int len_ms) {
@@ -91,7 +61,6 @@ void audio_async::StartAsyncService(std::string server_address) {
 
     mup_grpc_thread.reset(new std::thread(
         (std::bind(&audio_async::GrpcThread, this))));   
-    log("************ Server listening on " + server_address + " ************");    
 }
 
 void audio_async::Shutdown() {
@@ -123,7 +92,6 @@ void audio_async::GrpcThread() {
         void* got_tag = nullptr;
         bool ok = false;
         if (!mup_cq->Next(&got_tag, &ok)) {
-            error_log("Server stream closed. Quitting");
             break;
         }
 
@@ -137,27 +105,22 @@ void audio_async::GrpcThread() {
                 break;
             case TagType::CONNECT:
                 m_connected = true;
-                log(">>  Client connected.");
                 WaitForRequest();
                 break;
             case TagType::WRITE:
                 // Async write done, great -- just wait for next activity (read or new external write) now that it is out
                 break;
             case TagType::DONE:
-                log("  Server disconnecting.");
                 m_connected = false;
                 break;
             case TagType::FINISH:
-                error_log(">>>>  Server quitting.");
                 m_running = false;
                 break;
             default:
-                error_log("Unexpected tag: " + std::to_string(reinterpret_cast<size_t>(got_tag)));
                 assert(false);
             }
         } else {
             m_running = false;
-            error_log(">>>>>> CQ STATUS NOT OK (maybe disconnected)! -- Restarting listener for new connection");
             StartNewRpcConnectionListner();
         }
     }
@@ -185,18 +148,14 @@ static inline std::vector<float> convert_s16le_string_data_to_floats(std::string
 } 
 
 void audio_async::IngestAudioData() {
-    //log("Got data");
     std::vector<float> sampleData = convert_s16le_string_data_to_floats(m_request.audio_data());
-    //log("about to call callback");
     this->callback((uint8_t*) sampleData.data(), sampleData.size()*sizeof(float));
-    //log("==> Now audio is of size: "+std::to_string(m_audio_len));
 }
 
 void audio_async::SendTranscription(std::string transcript, int seq_num,
     std::time_t start_time, std::time_t end_time) 
 {
     if (m_connected) {
-      //log(">> EXTERNAL writing:  "+transcript);
       TranscriptResponse response;
       response.set_transcription(transcript);
       response.set_seq_num(seq_num);
@@ -204,7 +163,7 @@ void audio_async::SendTranscription(std::string transcript, int seq_num,
       //response.set_end_time(end_time);
       mup_stream->Write(response, reinterpret_cast<void*>(TagType::WRITE));
     } else {
-      error_log(">>>>>> CANNOT SEND TRANSCRIPTION -- NOT RUNNING");
+      fprintf(stderr, ">>>>>> CANNOT SEND TRANSCRIPTION -- NOT RUNNING");
     }
 }
 //
@@ -271,7 +230,6 @@ void audio_async::callback(uint8_t * stream, int len) {
         std::lock_guard<std::mutex> lock(m_mutex);
 
         if (m_audio_pos + n_samples > m_audio.size()) {
-                    log("position + samles > size");
             const size_t n0 = m_audio.size() - m_audio_pos;
 
             memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(float));
