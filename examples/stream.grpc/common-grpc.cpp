@@ -128,7 +128,6 @@ void audio_async::GrpcThread() {
         }
 
         if (ok) {
-            //log("**** Processing completion queue tag " + std::to_string(reinterpret_cast<size_t>(got_tag)));
             // Inline event handler and quasi-state machine (though this handles asynch reads/writes, so a strict SM is not applicable)
             switch (static_cast<TagType>(reinterpret_cast<size_t>(got_tag))) {
             case TagType::READ:
@@ -162,7 +161,6 @@ void audio_async::GrpcThread() {
             StartNewRpcConnectionListner();
         }
     }
-    log("----------> LEAVING GRPC THREAD");
 }
 
 void audio_async::WaitForRequest() {
@@ -191,7 +189,7 @@ void audio_async::IngestAudioData() {
     std::vector<float> sampleData = convert_s16le_string_data_to_floats(m_request.audio_data());
     //log("about to call callback");
     this->callback((uint8_t*) sampleData.data(), sampleData.size()*sizeof(float));
-    log("==> Now audio is of size: "+std::to_string(m_audio_len));
+    //log("==> Now audio is of size: "+std::to_string(m_audio_len));
 }
 
 void audio_async::SendTranscription(std::string transcript, int seq_num,
@@ -214,37 +212,25 @@ void audio_async::SendTranscription(std::string transcript, int seq_num,
 //
 
 bool audio_async::resume() {
-    // if (!m_dev_id_in) {
-    //     fprintf(stderr, "%s: no audio device to resume!\n", __func__);
-    //     return false;
-    // }
 
-    // if (m_running) {
-    //     fprintf(stderr, "%s: already running!\n", __func__);
-    //     return false;
-    // }
+    if (m_running) {
+        fprintf(stderr, "%s: already running!\n", __func__);
+        return false;
+    }
 
-    // SDL_PauseAudioDevice(m_dev_id_in, 0);
-
-    // m_running = true;
+    m_running = true;
 
     return true;
 }
 
 bool audio_async::pause() {
-    // if (!m_dev_id_in) {
-    //     fprintf(stderr, "%s: no audio device to pause!\n", __func__);
-    //     return false;
-    // }
 
-    // if (!m_running) {
-    //     fprintf(stderr, "%s: already paused!\n", __func__);
-    //     return false;
-    // }
+    if (!m_running) {
+        fprintf(stderr, "%s: already paused!\n", __func__);
+        return false;
+    }
 
-    // SDL_PauseAudioDevice(m_dev_id_in, 1);
-
-    // m_running = false;
+    m_running = false;
 
     return true;
 }
@@ -269,25 +255,17 @@ bool audio_async::clear() {
 // callback to be called by SDL
 void audio_async::callback(uint8_t * stream, int len) {
 
-    //std::cout << "Called back with: " << data << std::endl;
     if (!m_running) {
         return;
     }
 
     size_t n_samples = len / sizeof(float);
 
-    //log("in callback, and calculated "+std::to_string(n_samples) + " samples");
-
     if (n_samples > m_audio.size()) {
         n_samples = m_audio.size();
 
         stream += (len - (n_samples * sizeof(float)));
-        log("adjusted location");
     }
-
-        
-
-    //fprintf(stderr, "%s: %zu samples, pos %zu, len %zu\n", __func__, n_samples, m_audio_pos, m_audio_len);
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -302,26 +280,14 @@ void audio_async::callback(uint8_t * stream, int len) {
             m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
             m_audio_len = m_audio.size();
         } else {
-            //log("else");
             memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(float));
-            //log("else memcopty with pos "+std::to_string(m_audio_pos)+" samples "+std::to_string(n_samples)+" and audio size "+std::to_string(m_audio.size()));
             m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-            //            log("else pos adjusted");
             m_audio_len = std::min(m_audio_len + n_samples, m_audio.size());
-            //log("else len adjusted");
         }
     }
-    //log("leaving callback");
 }
 
 void audio_async::get(int ms, std::vector<float> & result) {
-
-    std::this_thread::sleep_for (std::chrono::seconds(3));
-
-    // if (!m_dev_id_in) {
-    //     fprintf(stderr, "%s: no audio device to get audio from!\n", __func__);
-    //     return;
-    // }
 
     if (!m_running) {
         fprintf(stderr, "%s: not running!\n", __func__);
