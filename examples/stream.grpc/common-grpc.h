@@ -32,7 +32,7 @@ public:
 
     bool init(int server_port, int sample_rate);
 
-    // start capturing audio via the provided SDL callback
+    // start capturing audio via the provided gRPC callback
     // keep last len_ms seconds of audio in a circular buffer
     bool resume();
     bool pause();
@@ -61,7 +61,6 @@ private:
     int seq_num = 0;
     int m_len_ms = 0;
     int m_sample_rate = 0;
-    //std::unique_ptr<AudioTranscriptionServiceImpl> m_service;
 
     std::atomic_bool m_running = false;
     std::atomic_bool m_connected = false;
@@ -70,7 +69,6 @@ private:
     std::vector<float> m_audio;
     size_t             m_audio_pos = 0;
     size_t             m_audio_len = 0;
-
 
     // Async GRPC service support
     std::unique_ptr<ServerCompletionQueue> mup_cq;

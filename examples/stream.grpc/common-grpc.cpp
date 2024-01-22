@@ -1,6 +1,5 @@
 #include "common-grpc.h"
 
-
 #include <fstream>
 #include <string>
 #include <iostream>
@@ -36,20 +35,22 @@ audio_async::~audio_async() {
 
 bool audio_async::init(int server_port, int sample_rate) {
 
+    // audio buffer param init
     m_sample_rate = sample_rate;
+    m_audio.resize((m_sample_rate*m_len_ms)/1000);
 
-     m_audio.resize((m_sample_rate*m_len_ms)/1000);
-
-    m_server_address = "0.0.0.0:"+ std::to_string(server_port);
-
+    // gRPC startup
     grpc::EnableDefaultHealthCheckService(true);
-
+    m_server_address = "0.0.0.0:"+ std::to_string(server_port);
     StartAsyncService(m_server_address);
     fprintf(stdout, "\n***************** Started gRPC server at: %s *****************\n", m_server_address.c_str());
 
     return true;
 }
 
+//
+// BEGIN GPRC PROCESSING
+//
 void audio_async::StartAsyncService(std::string server_address) {
     ServerBuilder builder;
     // Listen on the given address without any authentication mechanism.
@@ -69,10 +70,7 @@ void audio_async::Shutdown() {
     mup_cq->Shutdown();  
 }
 
-//
-// BEGIN GPRC PROCESSING
-//
-  void audio_async::StartNewRpcConnectionListner() {
+void audio_async::StartNewRpcConnectionListner() {
     std::unique_ptr<ServerContext> context = std::make_unique<ServerContext>();
     // This initiates a single stream for a single client. To allow multiple
     // clients in different threads to connect, simply 'request' from the
@@ -85,7 +83,7 @@ void audio_async::Shutdown() {
     // This is important as the server should know when the client is done.
     context->AsyncNotifyWhenDone(reinterpret_cast<void*>(TagType::DONE));    
     m_running = true;
-  }
+}
 
 
 void audio_async::GrpcThread() {
@@ -100,7 +98,7 @@ void audio_async::GrpcThread() {
             // Inline event handler and quasi-state machine (though this handles asynch reads/writes, so a strict SM is not applicable)
             switch (static_cast<TagType>(reinterpret_cast<size_t>(got_tag))) {
             case TagType::READ:
-                // Read done, great -- just wait for next activity (read or new external write) now that it is out
+                // Read done, great -- just ingest into processing buffer and wait for next activity (read or transcription write)
                 IngestAudioData();
                 WaitForRequest();
                 break;
@@ -109,7 +107,7 @@ void audio_async::GrpcThread() {
                 WaitForRequest();
                 break;
             case TagType::WRITE:
-                // Async write done, great -- just wait for next activity (read or new external write) now that it is out
+                // Async write done, great -- just wait for next activity (read or new transcription write) now that it is out
                 break;
             case TagType::DONE:
                 m_connected = false;
@@ -129,9 +127,6 @@ void audio_async::GrpcThread() {
 
 void audio_async::WaitForRequest() {
     if (m_connected) {
-        // In the case of the server, we wait for a READ first and then write a
-        // response. A server cannot initiate a connection so the server has to
-        // wait for the client to send a message in order for it to respond back.
         mup_stream->Read(&m_request, reinterpret_cast<void*>(TagType::READ));
     }
 }
@@ -164,7 +159,7 @@ void audio_async::SendTranscription(std::string transcript, int seq_num,
       //response.set_end_time(end_time);
       mup_stream->Write(response, reinterpret_cast<void*>(TagType::WRITE));
     } else {
-      fprintf(stderr, ">>>>>> CANNOT SEND TRANSCRIPTION -- NOT RUNNING");
+      fprintf(stderr, ">>>>>> CANNOT SEND TRANSCRIPTION -- NOT CONNECTED");
     }
 }
 //
@@ -212,7 +207,7 @@ bool audio_async::clear() {
     return true;
 }
 
-// callback to be called by SDL
+// callback to be called by gRPC to populate processing buffer with request data
 void audio_async::callback(uint8_t * stream, int len) {
 
     if (!m_running) {
@@ -246,6 +241,7 @@ void audio_async::callback(uint8_t * stream, int len) {
     }
 }
 
+// method for processor (whisper) to get next chunk of audio buffer data to transcribe
 void audio_async::get(int ms, std::vector<float> & result) {
 
     if (!m_running) {
