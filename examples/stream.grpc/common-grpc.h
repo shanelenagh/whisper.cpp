@@ -21,6 +21,7 @@ using grpc::ServerBuilder;
 using grpc::ServerCompletionQueue;
 using grpc::ServerContext;
 using grpc::Status;
+using google::protobuf::Timestamp;
 
 //
 // gRPC server audio capture
@@ -30,7 +31,7 @@ public:
     audio_async(int len_ms);
     ~audio_async();
 
-    bool init(int server_port, int sample_rate);
+    bool init(std::string grpc_server_host, int grpc_server_port, int sample_rate);
 
     // start capturing audio via the provided gRPC callback
     // keep last len_ms seconds of audio in a circular buffer
@@ -41,26 +42,28 @@ public:
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio);
-    void SendTranscription(std::string transcript, int seq_num,
-        std::time_t start_time = std::time(0), std::time_t end_time= std::time(0)) ;
+    void grpc_send_transcription(std::string transcript, int64_t start_time = 0, int64_t end_time = 0 /*int seq_num,
+        std::time_t start_time = std::time(0), std::time_t end_time= std::time(0)*/) ;
 
 private:
     enum class TagType { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
     // GRPC service methods
-    void StartNewRpcConnectionListner();
-    void GrpcThread();
-    void WaitForRequest();
-    void IngestAudioData();
-    void StartAsyncService(std::string server_address);
+    void grpc_start_new_connection_listener();
+    void grpc_handler_thread();
+    void grpc_wait_for_request();
+    void grpc_ingest_request_audio_data();
+    void grpc_start_async_service(std::string server_address);
+    void grpc_shutdown();
+    Timestamp* add_time_to_session_start(int64_t centiseconds);
 
-    void Shutdown();
-
-    // callback to be called by gRPC
+    // processing buffer load callback to be called by gRPC
     void callback(uint8_t * stream, int len);    
 
-    int seq_num = 0;
+    int seq_num = 1;
     int m_len_ms = 0;
     int m_sample_rate = 0;
+    int m_transcript_seq_num = 0;
+    int64_t m_first_request_time_epoch_ms = 0;
 
     std::atomic_bool m_running = false;
     std::atomic_bool m_connected = false;
@@ -77,5 +80,4 @@ private:
     AudioTranscription::AsyncService m_service;
     AudioSegmentRequest m_request;
     std::unique_ptr<std::thread> mup_grpc_thread;
-    std::string m_server_address;
 };

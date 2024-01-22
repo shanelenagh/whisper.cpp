@@ -2,9 +2,9 @@
 //
 // A very quick-n-dirty implementation serving mainly as a proof of concept.
 //
-#include "../common.h"
+#include "common.h"
 #include "common-grpc.h"
-#include "../../whisper.h"
+#include "whisper.h"
 
 #include <cassert>
 #include <cstdio>
@@ -52,6 +52,9 @@ struct whisper_params {
     bool save_audio    = false; // save audio to wav file
     bool use_gpu       = true;
 
+    std::string grpc_host  = "0.0.0.0";
+    int32_t     grpc_port  = 50051;    
+
     std::string language  = "en";
     std::string model     = "models/ggml-base.en.bin";
     std::string fname_out;
@@ -87,6 +90,8 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-tdrz" || arg == "--tinydiarize")   { params.tinydiarize   = true; }
         else if (arg == "-sa"   || arg == "--save-audio")    { params.save_audio    = true; }
         else if (arg == "-ng"   || arg == "--no-gpu")        { params.use_gpu       = false; }
+        else if (arg == "-gh"   || arg == "--grpc-host")     { params.grpc_host     = argv[++i]; }
+        else if (arg == "-gp"   || arg == "--grpc-port")     { params.grpc_port     = std::stof(argv[++i]); }
 
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
@@ -124,6 +129,8 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  -tdrz,    --tinydiarize   [%-7s] enable tinydiarize (requires a tdrz model)\n",     params.tinydiarize ? "true" : "false");
     fprintf(stderr, "  -sa,      --save-audio    [%-7s] save the recorded audio to a file\n",              params.save_audio ? "true" : "false");
     fprintf(stderr, "  -ng,      --no-gpu        [%-7s] disable GPU inference\n",                          params.use_gpu ? "false" : "true");
+    fprintf(stderr, "  -gh,      --grpc-host     [%-7s] gRPC host name/IP to listen at\n",                 params.grpc_host.c_str());
+    fprintf(stderr, "  -gp,      --grpc-port     [%-7d] gRPC port to listen at\n",                         params.grpc_port);
     fprintf(stderr, "\n");
 }
 
@@ -153,14 +160,10 @@ int main(int argc, char ** argv) {
     // init audio
 
     audio_async audio(params.length_ms);
-    if (!audio.init(50051 /*TODO: get server port from CLI */, WHISPER_SAMPLE_RATE)) {
+    if (!audio.init(params.grpc_host, params.grpc_port, WHISPER_SAMPLE_RATE)) {
         fprintf(stderr, "%s: audio.init() failed!\n", __func__);
         return 1;
     }
-
-        // Shane: Nah, just wait....
-        //std::cout << "GOING TO SLEEP IN WHISPER STREAMER\n";
-        //std::this_thread::sleep_for(std::chrono::seconds(1000));    
 
     audio.resume();
 
@@ -260,16 +263,12 @@ int main(int argc, char ** argv) {
         if (!use_vad) {
             while (true) {
                 audio.get(params.step_ms, pcmf32_new);
-                //fprintf(stderr, "\nGot audio of size %d\n", pcmf32_new.size());
                 if ((int) pcmf32_new.size() > 2*n_samples_step) {
-                    fprintf(stderr, "\n\n%s: WARNING: cannot process audio fast enough, dropping audio ...\n\n", __func__);
-                    //audio.SendTranscription("Fake", 1);
                     audio.clear();
                     continue;
                 }
 
                 if ((int) pcmf32_new.size() >= n_samples_step) {
-                    //std::cout << "CLEARING!!!!\n";
                     audio.clear();
                     break;
                 }
@@ -315,8 +314,6 @@ int main(int argc, char ** argv) {
 
             t_last = t_now;
         }
-
-        int trans_seq_num = 1;
 
         // run the inference
         {
@@ -371,6 +368,9 @@ int main(int argc, char ** argv) {
                 for (int i = 0; i < n_segments; ++i) {
                     const char * text = whisper_full_get_segment_text(ctx, i);
 
+                    const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
+                    const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
+
                     if (params.no_timestamps) {
                         printf("%s", text);
                         fflush(stdout);
@@ -379,8 +379,6 @@ int main(int argc, char ** argv) {
                             fout << text;
                         }
                     } else {
-                        const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
-                        const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
                         std::string output = "[" + to_timestamp(t0) + " --> " + to_timestamp(t1) + "]  " + text;
 
@@ -397,8 +395,8 @@ int main(int argc, char ** argv) {
                             fout << output;
                         }
                     }
-                    // Send output to service
-                    audio.SendTranscription(std::string(text), trans_seq_num++);
+                    // Send output to gRPC service
+                    audio.grpc_send_transcription(std::string(text), t0, t1);
                 }
 
                 if (params.fname_out.length() > 0) {
