@@ -45,7 +45,7 @@ bool audio_async::init(int server_port, int sample_rate) {
     grpc::EnableDefaultHealthCheckService(true);
 
     StartAsyncService(m_server_address);
-    fprintf(stdout, "\n***************** Started server at: %s *****************\n", m_server_address.c_str());
+    fprintf(stdout, "\n***************** Started gRPC server at: %s *****************\n", m_server_address.c_str());
 
     return true;
 }
