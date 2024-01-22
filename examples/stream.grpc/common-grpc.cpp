@@ -170,7 +170,7 @@ Timestamp* audio_async::add_time_to_session_start(int64_t centiseconds) {
 
 void audio_async::grpc_send_transcription(std::string transcript, int64_t start_time, int64_t end_time) 
 {
-    fprintf(stderr, "\nSegment was from %ld to %ld\n", start_time, end_time);
+    
     if (m_connected) {
       TranscriptResponse response;
       response.set_transcription(transcript);
