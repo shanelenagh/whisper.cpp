@@ -68,6 +68,7 @@ void audio_async::grpc_start_async_service(std::string server_address) {
 }
 
 void audio_async::grpc_shutdown() {
+
     mup_server->Shutdown();
     mup_cq->Shutdown();  
 }
@@ -86,47 +87,52 @@ void audio_async::grpc_start_new_connection_listener() {
         reinterpret_cast<void*>(TagType::CONNECT));
     // This is important as the server should know when the client is done.
     context->AsyncNotifyWhenDone(reinterpret_cast<void*>(TagType::DONE));    
-    m_running = true;
 }
 
 
 void audio_async::grpc_handler_thread() {
 
     while (true) {
-        void* got_tag = nullptr;
-        bool ok = false;
-        if (!mup_cq->Next(&got_tag, &ok)) {
-            break;
-        }
+        if (m_running) {
+            void* got_tag = nullptr;
+            bool ok = false;
+            if (!mup_cq->Next(&got_tag, &ok)) {
+                break;
+            }
 
-        if (ok) {
-            // Inline event handler and quasi-state machine (though this handles asynch reads/writes, so a strict SM is not applicable)
-            switch (static_cast<TagType>(reinterpret_cast<size_t>(got_tag))) {
-            case TagType::READ:
-                // Read done, great -- just ingest into processing buffer and wait for next activity (read or transcription write)
-                grpc_ingest_request_audio_data();
-                grpc_wait_for_request();
-                break;
-            case TagType::CONNECT:
-                m_connected = true;
-                m_first_request_time_epoch_ms = 0;
-                grpc_wait_for_request();
-                break;
-            case TagType::WRITE:
-                // Async write done, great -- just wait for next activity (read or new transcription write) now that it is out
-                break;
-            case TagType::DONE:
-                m_connected = false;
-                break;
-            case TagType::FINISH:
-                m_running = false;
-                break;
-            default:
-                assert(false);
+            if (ok) {
+                // Inline event handler and quasi-state machine (though this handles asynch reads/writes, so a strict SM is not applicable)
+                switch (static_cast<TagType>(reinterpret_cast<size_t>(got_tag))) {
+                case TagType::READ:
+                    // Read done, great -- just ingest into processing buffer and wait for next activity (read or transcription write)
+                    grpc_ingest_request_audio_data();
+                    grpc_wait_for_request();
+                    break;
+                case TagType::CONNECT:
+                    m_connected = true;
+                    m_first_request_time_epoch_ms = 0;
+                    grpc_wait_for_request();
+                    break;
+                case TagType::WRITE:
+                    // Async write done, great -- just wait for next activity (read or new transcription write) now that it is out
+                    break;
+                case TagType::DONE:
+                    m_connected = false;
+                    break;
+                case TagType::FINISH:
+                    pause();
+                    break;
+                default:
+                    assert(false);
+                }
+            } else {
+                pause();
+                clear();    // clear pointers to any remaining audio data for new connections
+                grpc_start_new_connection_listener();
+                resume();
             }
         } else {
-            m_running = false;
-            grpc_start_new_connection_listener();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
 }
@@ -211,11 +217,6 @@ bool audio_async::pause() {
 }
 
 bool audio_async::clear() {
-
-    if (!m_running) {
-        fprintf(stderr, "%s: not running!\n", __func__);
-        return false;
-    }
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
