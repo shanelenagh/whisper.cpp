@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 
 service AudioTranscription {
     // Method for bidirectional stream transcription of audio
-    // Sends audio binary data (16Khz mono PCM) and receives transcript back
+    // Sends audio binary data (16Khz mono PCM s16le) and receives transcript back
     rpc TranscribeAudio(stream AudioSegmentRequest) returns (stream TranscriptResponse) {}
 }
 
