@@ -67,6 +67,7 @@ private:
 
     std::atomic_bool m_running = false;
     std::atomic_bool m_connected = false;
+    std::atomic_bool m_writing = false;
     std::mutex       m_mutex;
 
     std::vector<float> m_audio;

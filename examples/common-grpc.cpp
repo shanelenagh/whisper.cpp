@@ -115,6 +115,7 @@ void audio_async::grpc_handler_thread() {
                     break;
                 case TagType::WRITE:
                     // Async write done, great -- just wait for next activity (read or new transcription write) now that it is out
+                    m_writing = false;
                     break;
                 case TagType::DONE:
                     m_connected = false;
@@ -176,8 +177,8 @@ Timestamp* audio_async::add_time_to_session_start(int64_t centiseconds) {
 
 void audio_async::grpc_send_transcription(std::string transcript, int64_t start_time, int64_t end_time) 
 {
-    
-    if (m_connected) {
+    if (m_connected && !m_writing) {
+      m_writing = true;
       TranscriptResponse response;
       response.set_transcription(transcript);
       response.set_seq_num(m_transcript_seq_num++);   
