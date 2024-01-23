@@ -213,6 +213,14 @@ int main(int argc, char ** argv) {
         }
 
         fprintf(stderr, "\n");
+
+        //if (!params.no_prints) {
+            // print system information
+            fprintf(stderr, "\n");
+            fprintf(stderr, "system_info: %s\n", whisper_print_system_info());
+            fprintf(stderr, "\n");
+        //}
+
     }
 
     int n_iter = 0;
