@@ -16,13 +16,8 @@
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
-using grpc::ServerReader;
-using grpc::ServerReaderWriter;
-using grpc::ServerWriter;
-using grpc::Status;
 using google::protobuf::util::TimeUtil;
 using google::protobuf::Timestamp;
-using sigper::transcription::AudioTranscription;
 using sigper::transcription::AudioSegmentRequest;
 using sigper::transcription::TranscriptResponse;
 
@@ -177,7 +172,10 @@ Timestamp* audio_async::add_time_to_session_start(int64_t centiseconds) {
 
 void audio_async::grpc_send_transcription(std::string transcript, int64_t start_time, int64_t end_time) 
 {
-    if (m_connected && !m_writing) {
+    if (m_connected) {
+      while (m_writing) {  // Let's wait for previous write to finish
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));    
+      }
       m_writing = true;
       TranscriptResponse response;
       response.set_transcription(transcript);
