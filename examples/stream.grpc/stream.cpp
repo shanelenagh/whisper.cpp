@@ -410,6 +410,7 @@ int main(int argc, char ** argv) {
                             fout << output;
                         }
                     }
+                    
                     // Send output to gRPC service
                     audio.grpc_send_transcription(std::string(text), t0, t1);
                 }
