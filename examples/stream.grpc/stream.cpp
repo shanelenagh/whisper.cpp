@@ -221,12 +221,9 @@ int main(int argc, char ** argv) {
 
         fprintf(stderr, "\n");
 
-        //if (!params.no_prints) {
-            // print system information
-            fprintf(stderr, "\n");
-            fprintf(stderr, "system_info: %s\n", whisper_print_system_info());
-            fprintf(stderr, "\n");
-        //}
+
+        fprintf(stderr, "\nsystem_info: n_threads = %d / %d | %s\n",
+            params.n_threads * 1/*params.n_processors*/, std::thread::hardware_concurrency(), whisper_print_system_info());
 
     }
 
@@ -259,6 +256,8 @@ int main(int argc, char ** argv) {
 
     auto t_last  = std::chrono::high_resolution_clock::now();
     const auto t_start = t_last;
+
+    int64_t t_transcript_start = 0, t_transcript_end = 0;
 
     // main audio loop
     while (is_running) {
@@ -317,6 +316,7 @@ int main(int argc, char ** argv) {
                 continue;
             }
 
+            //fprintf(stdout, "\nUSING VAD, SO HARDCODED STEP OF 2000!!!!!!!!!!!!!\n");
             audio.get(2000, pcmf32_new);
 
             if (::vad_simple(pcmf32_new, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, false)) {
@@ -374,6 +374,9 @@ int main(int argc, char ** argv) {
                     const int64_t t1 = (t_last - t_start).count()/1000000;
                     const int64_t t0 = std::max(0.0, t1 - pcmf32.size()*1000.0/WHISPER_SAMPLE_RATE);
 
+                    t_transcript_start = t0;
+                    t_transcript_end = t1;
+
                     printf("\n");
                     printf("### Transcription %d START | t0 = %d ms | t1 = %d ms\n", n_iter, (int) t0, (int) t1);
                     printf("\n");
@@ -385,6 +388,11 @@ int main(int argc, char ** argv) {
 
                     const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                     const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
+
+                    if (!use_vad) {
+                        t_transcript_start = t0;
+                        t_transcript_end = t1;
+                    }
 
                     if (params.no_timestamps) {
                         printf("%s", text);
@@ -412,7 +420,7 @@ int main(int argc, char ** argv) {
                     }
                     
                     // Send output to gRPC service
-                    audio.grpc_send_transcription(std::string(text), t0, t1);
+                    audio.grpc_send_transcription(std::string(text), t_transcript_start, t_transcript_end);
                 }
 
                 if (params.fname_out.length() > 0) {
@@ -447,7 +455,6 @@ int main(int argc, char ** argv) {
                 }
             }
             fflush(stdout);
-
         }
     }
 

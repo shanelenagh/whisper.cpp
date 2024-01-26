@@ -161,9 +161,9 @@ void audio_async::grpc_ingest_request_audio_data() {
     this->callback((uint8_t*) sampleData.data(), sampleData.size()*sizeof(float));
 }
 
-Timestamp* audio_async::add_time_to_session_start(int64_t centiseconds) {
+Timestamp* audio_async::add_time_to_session_start(int64_t ms) {
 
-    int64_t sum_ms = m_first_request_time_epoch_ms + centiseconds * 10;
+    int64_t sum_ms = m_first_request_time_epoch_ms + ms;
     Timestamp* pb_time = new Timestamp;
     pb_time->set_seconds(sum_ms / 1000);
     pb_time->set_nanos(sum_ms % 1000 * 1000000);
