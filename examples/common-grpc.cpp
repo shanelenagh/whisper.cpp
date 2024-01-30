@@ -104,6 +104,7 @@ void audio_async::grpc_handler_thread() {
                     grpc_wait_for_request();
                     break;
                 case TagType::CONNECT:
+                    fprintf(stderr, "\n>>>>>> CONNECTED\n");
                     m_connected = true;
                     m_first_request_time_epoch_ms = 0;
                     grpc_wait_for_request();
@@ -155,10 +156,10 @@ static inline std::vector<float> convert_s16le_string_data_to_floats(std::string
 void audio_async::grpc_ingest_request_audio_data() {
 
     std::vector<float> sampleData = convert_s16le_string_data_to_floats(m_request.audio_data());
-    if (m_first_request_time_epoch_ms == 0) {
-        m_first_request_time_epoch_ms = TimeUtil::TimestampToMilliseconds(m_request.send_time());
+    {
+        //std::lock_guard<std::mutex> lock(m_mutex);
+        this->callback((uint8_t*) sampleData.data(), sampleData.size()*sizeof(float));
     }
-    this->callback((uint8_t*) sampleData.data(), sampleData.size()*sizeof(float));
 }
 
 Timestamp* audio_async::add_time_to_session_start(int64_t ms) {
@@ -245,6 +246,11 @@ void audio_async::callback(uint8_t * stream, int len) {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
+        if (m_first_request_time_epoch_ms == 0) {
+            m_first_request_time_epoch_ms = TimeUtil::TimestampToMilliseconds(m_request.send_time());
+            fprintf(stdout, "\n>>>>>> FIRST REQUEST TIME: %ld\n", m_first_request_time_epoch_ms);
+        }        
+
         if (m_audio_pos + n_samples > m_audio.size()) {
             const size_t n0 = m_audio.size() - m_audio_pos;
 
@@ -262,7 +268,7 @@ void audio_async::callback(uint8_t * stream, int len) {
 }
 
 // method for processor (whisper) to get next chunk of audio buffer data to transcribe
-void audio_async::get(int ms, std::vector<float> & result) {
+void audio_async::get(int ms, std::vector<float> & result, bool reset_request_time) {
 
     if (!m_running) {
         fprintf(stderr, "%s: not running!\n", __func__);
@@ -297,6 +303,10 @@ void audio_async::get(int ms, std::vector<float> & result) {
             memcpy(&result[n0], &m_audio[0], (n_samples - n0) * sizeof(float));
         } else {
             memcpy(result.data(), &m_audio[s0], n_samples * sizeof(float));
+        }
+
+        if (reset_request_time) {
+            m_first_request_time_epoch_ms = 0;
         }
     }
 }

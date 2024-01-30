@@ -35,7 +35,6 @@ struct whisper_params {
     int32_t step_ms    = 3000;
     int32_t length_ms  = 10000;
     int32_t keep_ms    = 200;
-    int32_t capture_id = -1;
     int32_t max_tokens = 32;
     int32_t audio_ctx  = 0;
 
@@ -51,6 +50,7 @@ struct whisper_params {
     bool tinydiarize   = false;
     bool save_audio    = false; // save audio to wav file
     bool use_gpu       = true;
+    int32_t beam_size    = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH).beam_search.beam_size;
 
     std::string openvino_encode_device = "CPU";    
 
@@ -76,7 +76,7 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (                  arg == "--step")          { params.step_ms       = std::stoi(argv[++i]); }
         else if (                  arg == "--length")        { params.length_ms     = std::stoi(argv[++i]); }
         else if (                  arg == "--keep")          { params.keep_ms       = std::stoi(argv[++i]); }
-        else if (arg == "-c"    || arg == "--capture")       { params.capture_id    = std::stoi(argv[++i]); }
+        else if (arg == "-bs"   || arg == "--beam-size")     { params.beam_size     = std::stoi(argv[++i]); }
         else if (arg == "-mt"   || arg == "--max-tokens")    { params.max_tokens    = std::stoi(argv[++i]); }
         else if (arg == "-ac"   || arg == "--audio-ctx")     { params.audio_ctx     = std::stoi(argv[++i]); }
         else if (arg == "-vth"  || arg == "--vad-thold")     { params.vad_thold     = std::stof(argv[++i]); }
@@ -116,7 +116,7 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "            --step N          [%-7d] audio step size in milliseconds\n",                params.step_ms);
     fprintf(stderr, "            --length N        [%-7d] audio length in milliseconds\n",                   params.length_ms);
     fprintf(stderr, "            --keep N          [%-7d] audio to keep from previous step in ms\n",         params.keep_ms);
-    fprintf(stderr, "  -c ID,    --capture ID      [%-7d] capture device ID\n",                              params.capture_id);
+    fprintf(stderr, "  -bs N,    --beam-size N     [%-7d] beam size for beam search\n",                      params.beam_size);
     fprintf(stderr, "  -mt N,    --max-tokens N    [%-7d] maximum number of tokens per audio chunk\n",       params.max_tokens);
     fprintf(stderr, "  -ac N,    --audio-ctx N     [%-7d] audio context size (0 - all)\n",                   params.audio_ctx);
     fprintf(stderr, "  -vth N,   --vad-thold N     [%-7.2f] voice activity detection threshold\n",           params.vad_thold);
@@ -320,7 +320,8 @@ int main(int argc, char ** argv) {
             audio.get(2000, pcmf32_new);
 
             if (::vad_simple(pcmf32_new, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, false)) {
-                audio.get(params.length_ms, pcmf32);
+                fprintf(stdout, "\nVAD: SPEECH DETECTED\n");
+                audio.get(params.length_ms, pcmf32, true);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -374,9 +375,6 @@ int main(int argc, char ** argv) {
                     const int64_t t1 = (t_last - t_start).count()/1000000;
                     const int64_t t0 = std::max(0.0, t1 - pcmf32.size()*1000.0/WHISPER_SAMPLE_RATE);
 
-                    t_transcript_start = t0;
-                    t_transcript_end = t1;
-
                     printf("\n");
                     printf("### Transcription %d START | t0 = %d ms | t1 = %d ms\n", n_iter, (int) t0, (int) t1);
                     printf("\n");
@@ -389,10 +387,11 @@ int main(int argc, char ** argv) {
                     const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                     const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                    if (!use_vad) {
-                        t_transcript_start = t0;
-                        t_transcript_end = t1;
-                    }
+                    //if (!use_vad) {
+                        t_transcript_start = t0*10;
+                        t_transcript_end = t1*10;
+                    //printf("\n=== Seg t0=%ld and t1=%ld\n", t0, t1);
+                    //}
 
                     if (params.no_timestamps) {
                         printf("%s", text);

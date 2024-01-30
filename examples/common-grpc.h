@@ -41,7 +41,7 @@ public:
     bool is_running();
 
     // get audio data from the circular buffer
-    void get(int ms, std::vector<float> & audio);
+    void get(int ms, std::vector<float> & audio, bool reset_request_time = false);
     void grpc_send_transcription(std::string transcript, int64_t start_time = 0, int64_t end_time = 0 /*int seq_num,
         std::time_t start_time = std::time(0), std::time_t end_time= std::time(0)*/) ;
 
