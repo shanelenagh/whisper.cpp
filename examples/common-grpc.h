@@ -42,8 +42,8 @@ public:
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio, bool reset_request_time = false);
-    void grpc_send_transcription(std::string transcript, int64_t start_time = 0, int64_t end_time = 0 /*int seq_num,
-        std::time_t start_time = std::time(0), std::time_t end_time= std::time(0)*/) ;
+    
+    void grpc_send_transcription(std::string transcript, int64_t interval_start_ms = 0, int64_t interval_end_ms = 0) ;
 
 private:
     enum class TagType { READ = 1, WRITE = 2, CONNECT = 3, DONE = 4, FINISH = 5 };
@@ -54,7 +54,7 @@ private:
     void grpc_ingest_request_audio_data();
     void grpc_start_async_service(std::string server_address);
     void grpc_shutdown();
-    Timestamp* add_time_to_session_start(int64_t centiseconds);
+    Timestamp* add_time_to_session_start(int64_t milliseconds);
 
     // processing buffer load callback to be called by gRPC
     void callback(uint8_t * stream, int len);    
@@ -80,5 +80,4 @@ private:
     std::unique_ptr<ServerAsyncReaderWriter<TranscriptResponse, AudioSegmentRequest>> mup_stream;
     AudioTranscription::AsyncService m_service;
     AudioSegmentRequest m_request;
-    std::unique_ptr<std::thread> mup_grpc_thread;
 };

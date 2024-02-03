@@ -257,7 +257,7 @@ int main(int argc, char ** argv) {
     auto t_last  = std::chrono::high_resolution_clock::now();
     const auto t_start = t_last;
 
-    int64_t t_transcript_start = 0, t_transcript_end = 0;
+    int64_t t_transcript_start_ms = 0, t_transcript_end_ms = 0;
 
     // main audio loop
     while (is_running) {
@@ -387,11 +387,8 @@ int main(int argc, char ** argv) {
                     const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                     const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                    //if (!use_vad) {
-                        t_transcript_start = t0*10;
-                        t_transcript_end = t1*10;
-                    //printf("\n=== Seg t0=%ld and t1=%ld\n", t0, t1);
-                    //}
+                    t_transcript_start_ms = t0*10;
+                    t_transcript_end_ms = t1*10;
 
                     if (params.no_timestamps) {
                         printf("%s", text);
@@ -418,8 +415,8 @@ int main(int argc, char ** argv) {
                         }
                     }
                     
-                    // Send output to gRPC service
-                    audio.grpc_send_transcription(std::string(text), t_transcript_start, t_transcript_end);
+                    // Send transcript to gRPC service
+                    audio.grpc_send_transcription(std::string(text), t_transcript_start_ms, t_transcript_end_ms);
                 }
 
                 if (params.fname_out.length() > 0) {

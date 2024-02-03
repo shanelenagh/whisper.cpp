@@ -47,7 +47,7 @@ bool audio_async::init(std::string grpc_server_host, int grpc_server_port, int s
 }
 
 //
-// BEGIN GPRC PROCESSING
+// BEGIN GPRC METHODS
 //
 void audio_async::grpc_start_async_service(std::string server_address) {
 
@@ -59,7 +59,7 @@ void audio_async::grpc_start_async_service(std::string server_address) {
     mup_server = builder.BuildAndStart();
 
     grpc_start_new_connection_listener();
-    mup_grpc_thread.reset(new std::thread((std::bind(&audio_async::grpc_handler_thread, this))));   
+    new std::thread(&audio_async::grpc_handler_thread, this);   
 }
 
 void audio_async::grpc_shutdown() {
@@ -104,7 +104,7 @@ void audio_async::grpc_handler_thread() {
                     grpc_wait_for_request();
                     break;
                 case TagType::CONNECT:
-                    fprintf(stderr, "\n>>>>>> CONNECTED\n");
+                    fprintf(stdout, "\n>>>>>> CLIENT CONNECTED\n");
                     m_connected = true;
                     m_first_request_time_epoch_ms = 0;
                     grpc_wait_for_request();
@@ -248,7 +248,6 @@ void audio_async::callback(uint8_t * stream, int len) {
 
         if (m_first_request_time_epoch_ms == 0) {
             m_first_request_time_epoch_ms = TimeUtil::TimestampToMilliseconds(m_request.send_time());
-            fprintf(stdout, "\n>>>>>> FIRST REQUEST TIME: %ld\n", m_first_request_time_epoch_ms);
         }        
 
         if (m_audio_pos + n_samples > m_audio.size()) {
