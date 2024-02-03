@@ -320,7 +320,6 @@ int main(int argc, char ** argv) {
             audio.get(2000, pcmf32_new);
 
             if (::vad_simple(pcmf32_new, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, false)) {
-                fprintf(stdout, "\nVAD: SPEECH DETECTED\n");
                 audio.get(params.length_ms, pcmf32, true);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
