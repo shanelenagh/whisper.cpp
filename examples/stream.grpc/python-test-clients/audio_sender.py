@@ -30,7 +30,7 @@ async def audio_transcription(stub: transcription_pb2_grpc.AudioTranscriptionStu
             last_response = response
 
 def print_utterance(response, last_response, two_prior_response, printfunc) -> bool:
-    msg = f"  [{response.seq_num:03d} {response.start_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}{'→' if sys.stdout.encoding.lower().startswith('utf') else '->'}{response.end_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}] - {response.transcription}"
+    msg = f"  [{response.seq_num:03d} {response.start_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}{'→' if printfunc != print or sys.stdout.encoding.lower().startswith('utf') else '->'}{response.end_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}] - {response.transcription}"
     if last_response is None:
         printfunc(msg, flush=True)
     else:
