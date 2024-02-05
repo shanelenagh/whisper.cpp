@@ -7,6 +7,7 @@ import datetime
 import pyaudio
 from difflib import SequenceMatcher
 import re
+import sys
 
 import grpc
 import transcription_pb2
@@ -29,8 +30,9 @@ async def audio_transcription(stub: transcription_pb2_grpc.AudioTranscriptionStu
             last_response = response
 
 def print_utterance(response, last_response, two_prior_response, printfunc) -> bool:
+    msg = f"  [{response.seq_num:03d} {response.start_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}{'→' if sys.stdout.encoding.lower().startswith('utf') else '->'}{response.end_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}] - {response.transcription}"
     if last_response is None:
-        printfunc(f"  [{response.seq_num:03d} {response.start_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}\u2192{response.end_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}] - {response.transcription}", flush=True)
+        printfunc(msg, flush=True)
     else:
         if response.transcription.strip().upper() in ["[BLANK AUDIO]", "[ SILENCE ]", "[BLANK_AUDIO]", "[SILENCE]"]:
             return False
@@ -50,7 +52,7 @@ def print_utterance(response, last_response, two_prior_response, printfunc) -> b
             printfunc(end=LINE_CLEAR, flush=True)
         else:
             printfunc(flush=True)
-        printfunc(f"  [{response.seq_num:03d} {response.start_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}\u2192{response.end_time.ToDatetime().strftime('%H:%M:%S.%f')[:-3]}] - {response.transcription}", end="", flush=True)
+        printfunc(msg, end="", flush=True)
     return True
 
 async def send_audio(call, async_byte_generator):
