@@ -1,18 +1,19 @@
 #include "common-sdl.h"
 
-audio_async::audio_async(int len_ms) {
+audio_async_sdl::audio_async_sdl(int len_ms) : audio_async(len_ms) {
+
     m_len_ms = len_ms;
 
     m_running = false;
 }
 
-audio_async::~audio_async() {
+audio_async_sdl::~audio_async_sdl() {
     if (m_dev_id_in) {
         SDL_CloseAudioDevice(m_dev_id_in);
     }
 }
 
-bool audio_async::init(int capture_id, int sample_rate) {
+bool audio_async_sdl::init(whisper_params params, int sample_rate) {
     SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     if (SDL_Init(SDL_INIT_AUDIO) < 0) {
@@ -46,9 +47,9 @@ bool audio_async::init(int capture_id, int sample_rate) {
     };
     capture_spec_requested.userdata = this;
 
-    if (capture_id >= 0) {
-        fprintf(stderr, "%s: attempt to open capture device %d : '%s' ...\n", __func__, capture_id, SDL_GetAudioDeviceName(capture_id, SDL_TRUE));
-        m_dev_id_in = SDL_OpenAudioDevice(SDL_GetAudioDeviceName(capture_id, SDL_TRUE), SDL_TRUE, &capture_spec_requested, &capture_spec_obtained, 0);
+    if (params.capture_id >= 0) {
+        fprintf(stderr, "%s: attempt to open capture device %d : '%s' ...\n", __func__, params.capture_id, SDL_GetAudioDeviceName(params.capture_id, SDL_TRUE));
+        m_dev_id_in = SDL_OpenAudioDevice(SDL_GetAudioDeviceName(params.capture_id, SDL_TRUE), SDL_TRUE, &capture_spec_requested, &capture_spec_obtained, 0);
     } else {
         fprintf(stderr, "%s: attempt to open default capture device ...\n", __func__);
         m_dev_id_in = SDL_OpenAudioDevice(nullptr, SDL_TRUE, &capture_spec_requested, &capture_spec_obtained, 0);
@@ -76,7 +77,7 @@ bool audio_async::init(int capture_id, int sample_rate) {
     return true;
 }
 
-bool audio_async::resume() {
+bool audio_async_sdl::resume() {
     if (!m_dev_id_in) {
         fprintf(stderr, "%s: no audio device to resume!\n", __func__);
         return false;
@@ -94,7 +95,7 @@ bool audio_async::resume() {
     return true;
 }
 
-bool audio_async::pause() {
+bool audio_async_sdl::pause() {
     if (!m_dev_id_in) {
         fprintf(stderr, "%s: no audio device to pause!\n", __func__);
         return false;
@@ -112,7 +113,7 @@ bool audio_async::pause() {
     return true;
 }
 
-bool audio_async::clear() {
+bool audio_async_sdl::clear() {
     if (!m_dev_id_in) {
         fprintf(stderr, "%s: no audio device to clear!\n", __func__);
         return false;
@@ -134,7 +135,7 @@ bool audio_async::clear() {
 }
 
 // callback to be called by SDL
-void audio_async::callback(uint8_t * stream, int len) {
+void audio_async_sdl::callback(uint8_t * stream, int len) {
     if (!m_running) {
         return;
     }
@@ -169,7 +170,7 @@ void audio_async::callback(uint8_t * stream, int len) {
     }
 }
 
-void audio_async::get(int ms, std::vector<float> & result) {
+void audio_async_sdl::get(int ms, std::vector<float> & result) {
     if (!m_dev_id_in) {
         fprintf(stderr, "%s: no audio device to get audio from!\n", __func__);
         return;

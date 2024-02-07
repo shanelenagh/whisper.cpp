@@ -8,28 +8,30 @@
 #include <vector>
 #include <mutex>
 
+#include <common-audioasync.h>
+
 //
 // SDL Audio capture
 //
 
-class audio_async {
+class audio_async_sdl : public audio_async {
 public:
-    audio_async(int len_ms);
-    ~audio_async();
+    audio_async_sdl(int len_ms);
+    ~audio_async_sdl();
 
-    bool init(int capture_id, int sample_rate);
+    bool init(whisper_params params, int sample_rate) override;
 
     // start capturing audio via the provided SDL callback
     // keep last len_ms seconds of audio in a circular buffer
-    bool resume();
-    bool pause();
-    bool clear();
+    bool resume() override;
+    bool pause() override;
+    bool clear() override;
 
     // callback to be called by SDL
-    void callback(uint8_t * stream, int len);
+    void callback(uint8_t * stream, int len) override;
 
     // get audio data from the circular buffer
-    void get(int ms, std::vector<float> & audio);
+    void get(int ms, std::vector<float> & audio) override;
 
 private:
     SDL_AudioDeviceID m_dev_id_in = 0;
