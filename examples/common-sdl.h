@@ -13,7 +13,6 @@
 //
 // SDL Audio capture
 //
-
 class audio_async_sdl : public audio_async {
 public:
     audio_async_sdl(int len_ms);
@@ -28,23 +27,13 @@ public:
     bool clear() override;
 
     // callback to be called by SDL
-    void callback(uint8_t * stream, int len) override;
+    void callback(uint8_t * stream, int len);
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio) override;
 
 private:
     SDL_AudioDeviceID m_dev_id_in = 0;
-
-    int m_len_ms = 0;
-    int m_sample_rate = 0;
-
-    std::atomic_bool m_running;
-    std::mutex       m_mutex;
-
-    std::vector<float> m_audio;
-    size_t             m_audio_pos = 0;
-    size_t             m_audio_len = 0;
 };
 
 // Return false if need to quit

@@ -1,11 +1,6 @@
 #include "common-sdl.h"
 
-audio_async_sdl::audio_async_sdl(int len_ms) : audio_async(len_ms) {
-
-    m_len_ms = len_ms;
-
-    m_running = false;
-}
+audio_async_sdl::audio_async_sdl(int len_ms) : audio_async(len_ms) { }
 
 audio_async_sdl::~audio_async_sdl() {
     if (m_dev_id_in) {
@@ -70,11 +65,7 @@ bool audio_async_sdl::init(whisper_params params, int sample_rate) {
         fprintf(stderr, "%s:     - samples per frame: %d\n",                   __func__, capture_spec_obtained.samples);
     }
 
-    m_sample_rate = capture_spec_obtained.freq;
-
-    m_audio.resize((m_sample_rate*m_len_ms)/1000);
-
-    return true;
+    return audio_async::init(params, capture_spec_obtained.freq);
 }
 
 bool audio_async_sdl::resume() {
@@ -83,16 +74,14 @@ bool audio_async_sdl::resume() {
         return false;
     }
 
-    if (m_running) {
+    if (is_running()) {
         fprintf(stderr, "%s: already running!\n", __func__);
         return false;
     }
 
     SDL_PauseAudioDevice(m_dev_id_in, 0);
 
-    m_running = true;
-
-    return true;
+    return audio_async::resume();
 }
 
 bool audio_async_sdl::pause() {
@@ -101,16 +90,14 @@ bool audio_async_sdl::pause() {
         return false;
     }
 
-    if (!m_running) {
+    if (!is_running()) {
         fprintf(stderr, "%s: already paused!\n", __func__);
         return false;
     }
 
     SDL_PauseAudioDevice(m_dev_id_in, 1);
 
-    m_running = false;
-
-    return true;
+    return audio_async::pause();
 }
 
 bool audio_async_sdl::clear() {
@@ -119,55 +106,7 @@ bool audio_async_sdl::clear() {
         return false;
     }
 
-    if (!m_running) {
-        fprintf(stderr, "%s: not running!\n", __func__);
-        return false;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-
-        m_audio_pos = 0;
-        m_audio_len = 0;
-    }
-
-    return true;
-}
-
-// callback to be called by SDL
-void audio_async_sdl::callback(uint8_t * stream, int len) {
-    if (!m_running) {
-        return;
-    }
-
-    size_t n_samples = len / sizeof(float);
-
-    if (n_samples > m_audio.size()) {
-        n_samples = m_audio.size();
-
-        stream += (len - (n_samples * sizeof(float)));
-    }
-
-    //fprintf(stderr, "%s: %zu samples, pos %zu, len %zu\n", __func__, n_samples, m_audio_pos, m_audio_len);
-
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-
-        if (m_audio_pos + n_samples > m_audio.size()) {
-            const size_t n0 = m_audio.size() - m_audio_pos;
-
-            memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(float));
-            memcpy(&m_audio[0], stream + n0 * sizeof(float), (n_samples - n0) * sizeof(float));
-
-            m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-            m_audio_len = m_audio.size();
-        } else {
-            memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(float));
-
-            m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-            m_audio_len = std::min(m_audio_len + n_samples, m_audio.size());
-        }
-    }
+    return audio_async::clear();
 }
 
 void audio_async_sdl::get(int ms, std::vector<float> & result) {
@@ -176,41 +115,7 @@ void audio_async_sdl::get(int ms, std::vector<float> & result) {
         return;
     }
 
-    if (!m_running) {
-        fprintf(stderr, "%s: not running!\n", __func__);
-        return;
-    }
-
-    result.clear();
-
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-
-        if (ms <= 0) {
-            ms = m_len_ms;
-        }
-
-        size_t n_samples = (m_sample_rate * ms) / 1000;
-        if (n_samples > m_audio_len) {
-            n_samples = m_audio_len;
-        }
-
-        result.resize(n_samples);
-
-        int s0 = m_audio_pos - n_samples;
-        if (s0 < 0) {
-            s0 += m_audio.size();
-        }
-
-        if (s0 + n_samples > m_audio.size()) {
-            const size_t n0 = m_audio.size() - s0;
-
-            memcpy(result.data(), &m_audio[s0], n0 * sizeof(float));
-            memcpy(&result[n0], &m_audio[0], (n_samples - n0) * sizeof(float));
-        } else {
-            memcpy(result.data(), &m_audio[s0], n_samples * sizeof(float));
-        }
-    }
+    audio_async::get(ms, result);
 }
 
 bool sdl_poll_events() {
