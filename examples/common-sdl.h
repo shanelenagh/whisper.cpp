@@ -22,15 +22,14 @@ public:
 
     // start capturing audio via the provided SDL callback
     // keep last len_ms seconds of audio in a circular buffer
-    bool resume() override;
-    bool pause() override;
-    bool clear() override;
-
-    // callback to be called by SDL
-    void callback(uint8_t * stream, int len);
+    bool resume();
+    bool pause();
+    bool clear();
 
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio) override;
+
+    void callback(uint8_t * stream, int len);
 
 private:
     SDL_AudioDeviceID m_dev_id_in = 0;

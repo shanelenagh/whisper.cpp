@@ -29,33 +29,6 @@ std::string to_timestamp(int64_t t) {
     return std::string(buf);
 }
 
-// command-line parameters
-struct whisper_params {
-    int32_t n_threads  = std::min(4, (int32_t) std::thread::hardware_concurrency());
-    int32_t step_ms    = 3000;
-    int32_t length_ms  = 10000;
-    int32_t keep_ms    = 200;
-    int32_t max_tokens = 32;
-    int32_t audio_ctx  = 0;
-
-    float vad_thold    = 0.6f;
-    float freq_thold   = 100.0f;
-
-    bool speed_up      = false;
-    bool translate     = false;
-    bool no_fallback   = false;
-    bool print_special = false;
-    bool no_context    = true;
-    bool no_timestamps = false;
-    bool tinydiarize   = false;
-    bool save_audio    = false; // save audio to wav file
-    bool use_gpu       = true;
-
-    std::string language  = "en";
-    std::string model     = "models/ggml-base.en.bin";
-    std::string fname_out;
-};
-
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
 
 bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
@@ -154,7 +127,7 @@ int main(int argc, char ** argv) {
     // init audio
 
     audio_stdin audio(params.length_ms);
-    if (!audio.init(STDIN_FILENO, WHISPER_SAMPLE_RATE)) {
+    if (!audio.init(params, WHISPER_SAMPLE_RATE)) {
       fprintf(stderr, "%s: audio.init() failed!\n", __func__);
       return 1;
     }
@@ -255,9 +228,10 @@ int main(int argc, char ** argv) {
 
         if (!use_vad) {
             while (true) {
-		if (!audio.get(params.step_ms, pcmf32_new)) {
-		  break; //eof, so just break out of the loop.
-		}
+                audio.get(params.step_ms, pcmf32_new);
+                if (pcmf32_new.size() == 0) {
+                    break; //eof, so just break out of the loop.
+                }
 
                 if ((int) pcmf32_new.size() > 2*n_samples_step) {
                     fprintf(stderr, "\n\n%s: WARNING: cannot process audio fast enough, dropping audio ...\n\n", __func__);
@@ -290,7 +264,7 @@ int main(int argc, char ** argv) {
 
             pcmf32_old = pcmf32;
         } else {
-	  const auto t_now  = std::chrono::high_resolution_clock::now();
+	        const auto t_now  = std::chrono::high_resolution_clock::now();
             const auto t_diff = std::chrono::duration_cast<std::chrono::milliseconds>(t_now - t_last).count();
 
             if (t_diff < 2000) {
@@ -299,12 +273,14 @@ int main(int argc, char ** argv) {
                 continue;
             }
 
-	    // TODO handle false returned here
             audio.get(2000, pcmf32_new);
 
             if (::vad_simple(pcmf32_new, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, false)) {
-	      // TODO handle false returned here
+
                 audio.get(params.length_ms, pcmf32);
+                if (pcmf32_new.size() == 0) {
+                    break; //eof, so just break out of the loop.
+                }
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
