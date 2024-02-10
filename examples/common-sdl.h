@@ -29,8 +29,6 @@ public:
     // get audio data from the circular buffer
     void get(int ms, std::vector<float> & audio) override;
 
-    void callback(uint8_t * stream, int len);
-
 private:
     SDL_AudioDeviceID m_dev_id_in = 0;
 };

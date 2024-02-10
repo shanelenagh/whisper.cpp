@@ -43,7 +43,6 @@ class audio_async {
 public:
     audio_async(int len_ms) { 
         m_len_ms = len_ms;
-
         m_running = false;
     };
     ~audio_async() { };
@@ -60,10 +59,12 @@ public:
         m_running = true;
         return true;
     }
+
     virtual bool pause() {
         m_running = false;
         return true;
     }
+
     virtual bool clear() {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -73,7 +74,10 @@ public:
         }
         return true;
     }
-    bool is_running() { return m_running; }
+
+    virtual bool is_interrupted() {
+        return m_interrupted;
+    }
 
     // get audio data from the circular buffer
     virtual void get(int ms, std::vector<float> & result) {
@@ -115,7 +119,7 @@ public:
     }
 
     // callback to be called by audio source
-    void callback(uint8_t * stream, int len) {
+    virtual void callback(uint8_t * stream, int len) {
         if (!m_running) {
             return;
         }
@@ -150,11 +154,12 @@ public:
         }
     }
 
-private:
+protected:
     int m_len_ms = 0;
     int m_sample_rate = 0;
 
     std::atomic_bool m_running;
+    std::atomic_bool m_interrupted = false;
     std::mutex       m_mutex;
 
     std::vector<float> m_audio;

@@ -7,22 +7,8 @@
 // handled the audio, this is implemented here.
 // TODO: split this out to something a bit more coherent
 
-bool should_quit = false;
-float S16_TO_F32_SCALE_FACTOR = 0.000030517578125f;
-
-void quit_signal_handler(int signal) {
-  if (signal == SIGINT || signal == SIGTERM) {
-    should_quit = true;
-  }
-}
-
-void install_signal_handler() {
-    std::signal(SIGINT, quit_signal_handler);
-    std::signal(SIGTERM, quit_signal_handler);
-}
-
-bool should_keep_running() {
-  return !should_quit;
+namespace stream_constants {
+  float S16_TO_F32_SCALE_FACTOR = 0.000030517578125f;
 }
 
 audio_stdin::audio_stdin(int len_ms) : audio_async(len_ms) { }
@@ -65,14 +51,15 @@ void audio_stdin::get(int ms, std::vector<float> & result) {
         // stdin is PCM mono 16khz in s16le format.  Use ffmpeg to make that happen.
         int nread = read(STDIN_FILENO, m_in_buffer.data(), n_samples*sizeof(int16_t) /*m_in_buffer.size()*/);
         if (nread <= 0) { 
-            result.resize(0);
-            return; 
+          m_running = false;
+          m_interrupted = true;
+          return; 
         }
 
-        int float_sample_count = nread / sizeof(float);
+        int float_sample_count = nread / sizeof(int16_t);
         result.resize(float_sample_count);
         for (int i = 0; i < float_sample_count; i++) {
-            result[i] = m_in_buffer[i] * S16_TO_F32_SCALE_FACTOR;
+            result[i] = m_in_buffer[i] * stream_constants::S16_TO_F32_SCALE_FACTOR;
         }
     }
 }

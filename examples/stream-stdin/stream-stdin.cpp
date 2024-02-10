@@ -100,7 +100,7 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
 
 
 int main(int argc, char ** argv) {
-    install_signal_handler();
+    //install_signal_handler();
 
     whisper_params params;
 
@@ -218,7 +218,7 @@ int main(int argc, char ** argv) {
             wavWriter.write(pcmf32_new.data(), pcmf32_new.size());
         }
         // handle Ctrl + C
-        is_running = should_keep_running();
+        is_running = !audio.is_interrupted();
 
         if (!is_running) {
             break;

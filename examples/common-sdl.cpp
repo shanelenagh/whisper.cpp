@@ -37,7 +37,7 @@ bool audio_async_sdl::init(whisper_params params, int sample_rate) {
     capture_spec_requested.channels = 1;
     capture_spec_requested.samples  = 1024;
     capture_spec_requested.callback = [](void * userdata, uint8_t * stream, int len) {
-        audio_async_sdl * audio = (audio_async_sdl *) userdata;
+        audio_async * audio = (audio_async *) userdata;
         audio->callback(stream, len);
     };
     capture_spec_requested.userdata = this;
@@ -84,39 +84,6 @@ bool audio_async_sdl::resume() {
     return audio_async::resume();
 }
 
-// callback to be called by audio source
-void audio_async_sdl::callback(uint8_t * stream, int len) {
-    if (!m_running) {
-        return;
-    }
-
-    size_t n_samples = len / sizeof(float);
-
-    if (n_samples > m_audio.size()) {
-        n_samples = m_audio.size();
-
-        stream += (len - (n_samples * sizeof(float)));
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-
-        if (m_audio_pos + n_samples > m_audio.size()) {
-            const size_t n0 = m_audio.size() - m_audio_pos;
-
-            memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(float));
-            memcpy(&m_audio[0], stream + n0 * sizeof(float), (n_samples - n0) * sizeof(float));
-
-            m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-            m_audio_len = m_audio.size();
-        } else {
-            memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(float));
-
-            m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
-            m_audio_len = std::min(m_audio_len + n_samples, m_audio.size());
-        }
-    }
-}
 
 bool audio_async_sdl::pause() {
     if (!m_dev_id_in) {
