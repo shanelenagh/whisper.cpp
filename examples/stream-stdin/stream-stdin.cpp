@@ -218,7 +218,7 @@ int main(int argc, char ** argv) {
             wavWriter.write(pcmf32_new.data(), pcmf32_new.size());
         }
         // handle Ctrl + C
-        is_running = !audio.is_interrupted();
+        is_running = audio.is_running();
 
         if (!is_running) {
             break;

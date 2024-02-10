@@ -75,8 +75,8 @@ public:
         return true;
     }
 
-    virtual bool is_interrupted() {
-        return m_interrupted;
+    virtual bool is_running() {
+        return m_running;
     }
 
     // get audio data from the circular buffer
@@ -159,7 +159,6 @@ protected:
     int m_sample_rate = 0;
 
     std::atomic_bool m_running;
-    std::atomic_bool m_interrupted = false;
     std::mutex       m_mutex;
 
     std::vector<float> m_audio;

@@ -2,6 +2,7 @@
 
 #include <csignal>
 #include <cstring>
+#include <cassert>
 
 // Because the original happened to handle OS signals in the same library as
 // handled the audio, this is implemented here.
@@ -48,11 +49,11 @@ void audio_stdin::get(int ms, std::vector<float> & result) {
 
         size_t n_samples = (m_sample_rate * ms) / 1000;
 
+        assert(n_samples <= m_in_buffer.size()/sizeof(int16_t));
         // stdin is PCM mono 16khz in s16le format.  Use ffmpeg to make that happen.
         int nread = read(STDIN_FILENO, m_in_buffer.data(), n_samples*sizeof(int16_t) /*m_in_buffer.size()*/);
         if (nread <= 0) { 
           m_running = false;
-          m_interrupted = true;
           return; 
         }
 
