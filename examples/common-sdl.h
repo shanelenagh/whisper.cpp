@@ -13,7 +13,7 @@
 //
 // SDL Audio capture
 //
-class audio_async_sdl : public audio_async {
+class audio_async_sdl : public audio_async<float> {
 public:
     audio_async_sdl(int len_ms);
     ~audio_async_sdl();

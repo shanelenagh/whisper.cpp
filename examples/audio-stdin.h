@@ -10,7 +10,7 @@
 //
 // Stdin wav capture
 //
-class audio_stdin  : public audio_async {
+class audio_stdin  : public audio_async<int16_t> {
 public:
     audio_stdin(int len_ms);
     ~audio_stdin();
@@ -20,10 +20,6 @@ public:
     // get audio data from the circular buffer
     // Returns false if the stream's closed.
     void get(int ms, std::vector<float> & audio) override;
-
-private:
-    // Since the data we plan on receiving needs converting, we need somewhere to hold it while we do that
-    std::vector<int16_t> m_in_buffer;    
 };
 
 // Return false if need to quit - goes false at eof?

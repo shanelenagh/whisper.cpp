@@ -8,6 +8,10 @@
 #include <thread>
 #include <cstring>
 
+namespace audioasync_constants {
+  const float S16_TO_F32_SCALE_FACTOR = 0.000030517578125f;
+}
+
 // command-line parameters
 struct whisper_params {
     int32_t n_threads  = std::min(4, (int32_t) std::thread::hardware_concurrency());
@@ -37,9 +41,9 @@ struct whisper_params {
 };
 
 //
-// Abstract interface for audio capture
+// Abstract class for audio capture
 //
-class audio_async {
+template <typename T = float> class audio_async {
 public:
     audio_async(int len_ms) { 
         m_len_ms = len_ms;
@@ -55,17 +59,17 @@ public:
         return true; 
     }
 
-    virtual bool resume() {
+    bool resume() {
         m_running = true;
         return true;
     }
 
-    virtual bool pause() {
+    bool pause() {
         m_running = false;
         return true;
     }
 
-    virtual bool clear() {
+    bool clear() {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -75,7 +79,7 @@ public:
         return true;
     }
 
-    virtual bool is_running() {
+    bool is_running() {
         return m_running;
     }
 
@@ -107,19 +111,12 @@ public:
                 s0 += m_audio.size();
             }
 
-            if (s0 + n_samples > m_audio.size()) {
-                const size_t n0 = m_audio.size() - s0;
-
-                memcpy(result.data(), &m_audio[s0], n0 * sizeof(float));
-                memcpy(&result[n0], &m_audio[0], (n_samples - n0) * sizeof(float));
-            } else {
-                memcpy(result.data(), &m_audio[s0], n_samples * sizeof(float));
-            }
+            transfer_buffer(result, s0, n_samples);
         }        
     }
 
-    // callback to be called by audio source
-    virtual void callback(uint8_t * stream, int len) {
+    // buffer callback persistence to be called by audio source ingester
+    void callback(uint8_t * stream, int len) {
         if (!m_running) {
             return;
         }
@@ -129,7 +126,7 @@ public:
         if (n_samples > m_audio.size()) {
             n_samples = m_audio.size();
 
-            stream += (len - (n_samples * sizeof(float)));
+            stream += (len - (n_samples * sizeof(T)));
         }
 
         //fprintf(stderr, "%s: %zu samples, pos %zu, len %zu\n", __func__, n_samples, m_audio_pos, m_audio_len);
@@ -140,13 +137,13 @@ public:
             if (m_audio_pos + n_samples > m_audio.size()) {
                 const size_t n0 = m_audio.size() - m_audio_pos;
 
-                memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(float));
-                memcpy(&m_audio[0], stream + n0 * sizeof(float), (n_samples - n0) * sizeof(float));
+                memcpy(&m_audio[m_audio_pos], stream, n0 * sizeof(T));
+                memcpy(&m_audio[0], stream + n0 * sizeof(T), (n_samples - n0) * sizeof(T));
 
                 m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
                 m_audio_len = m_audio.size();
             } else {
-                memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(float));
+                memcpy(&m_audio[m_audio_pos], stream, n_samples * sizeof(T));
 
                 m_audio_pos = (m_audio_pos + n_samples) % m_audio.size();
                 m_audio_len = std::min(m_audio_len + n_samples, m_audio.size());
@@ -161,7 +158,41 @@ protected:
     std::atomic_bool m_running;
     std::mutex       m_mutex;
 
-    std::vector<float> m_audio;
+    std::vector<T> m_audio;
     size_t             m_audio_pos = 0;
     size_t             m_audio_len = 0;
+
+    void transfer_buffer(std::vector<float> & result, int start, int sampleCount);
 };
+
+// Fast memcpy transfer for float
+template <> inline void audio_async<float>::transfer_buffer(std::vector<float> & result, int start, int sampleCount) {
+    result.resize(sampleCount);
+    if (start + sampleCount > m_audio.size()) {
+        const size_t n0 = m_audio.size() - start;
+
+        memcpy(result.data(), &m_audio[start], n0 * sizeof(float));
+        memcpy(&result[n0], &m_audio[0], (sampleCount - n0) * sizeof(float));
+    } else {
+        memcpy(result.data(), &m_audio[start], sampleCount * sizeof(float));
+    }        
+}  
+
+// Conversion from int16_t to float for s16le buffers
+template <> inline void audio_async<int16_t>::transfer_buffer(std::vector<float> & result, int start, int sampleCount) {
+    result.resize(sampleCount);
+    if (start + sampleCount > m_audio.size()) {
+        const size_t n0 = m_audio.size() - start;
+
+        for (int i = 0; i < n0; i++) {
+            result[i] = m_audio[start + i] * audioasync_constants::S16_TO_F32_SCALE_FACTOR;
+        }
+        for (int i = n0; i < sampleCount; i++) {
+            result[i] = m_audio[i] * audioasync_constants::S16_TO_F32_SCALE_FACTOR;
+        }
+    } else {
+        for (int i = 0; i < sampleCount; i++) {
+            result[i] = m_audio[start + i] * audioasync_constants::S16_TO_F32_SCALE_FACTOR;
+        }
+    }        
+}
